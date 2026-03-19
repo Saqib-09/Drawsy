@@ -1,18 +1,36 @@
-// Game configuration constants
-export const TURN_MS = 70000;      // 70 seconds per turn
-export const WORD_PICK_MS = 12000; // 12 seconds to pick a word
-export const MAX_ROUNDS = 3;       // Game length in rounds
-export const MAX_STROKES = 10;     // Max number of points per stroke segment
-export const STROKE_FLUSH_MS = 300; // Debounce delay for batched stroke sync
+// ─── Timing ────────────────────────────────────────────────────────────────────
+export const TURN_MS       = 70000;   // 70s per drawing turn
+export const WORD_PICK_MS  = 12000;   // 12s to pick a word
+export const MAX_ROUNDS    = 3;       // full cycles of the draw order
+export const MAX_STROKES   = 10;      // points per stroke segment before flush
+export const STROKE_FLUSH_MS = 300;   // debounce for batched stroke sync
 
+// ─── Player limits ─────────────────────────────────────────────────────────────
+export const MIN_PLAYERS = 2;
+export const MAX_PLAYERS = 8;         // hard cap (Firestore doc size safety)
+
+// ─── Scoring ───────────────────────────────────────────────────────────────────
+// Guesser points — first correct guesser gets full tier, later guessers get 60%
 export const SCORING_TIERS = [
   { time: 20000, points: 50 },
   { time: 40000, points: 30 },
   { time: 60000, points: 20 },
   { time: 70000, points: 10 }
 ];
+export const LATE_GUESSER_MULT = 0.6; // subsequent correct guessers get 60%
+export const DRAWER_POINTS_MULT = 0.5; // drawer gets 50% of first guesser's points
 
-// Firebase configuration
+// ─── Game modes ────────────────────────────────────────────────────────────────
+export const MODE_FFA   = "ffa";    // free-for-all: everyone guesses
+export const MODE_TEAMS = "teams";  // 2 teams: only teammate guesses
+
+// ─── Team colours ──────────────────────────────────────────────────────────────
+export const TEAM_COLORS = [
+  { id: "red",  label: "Red Team",  bg: "#fee2e2", border: "#ef4444", text: "#991b1b", badge: "bg-red-100 text-red-800 border-red-300" },
+  { id: "blue", label: "Blue Team", bg: "#dbeafe", border: "#3b82f6", text: "#1e40af", badge: "bg-blue-100 text-blue-800 border-blue-300" },
+];
+
+// ─── Firebase ─────────────────────────────────────────────────────────────────
 export const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBs52rBVHrou5jhH-Nkym7WBFIkrGxrOQk",
   authDomain: "rukh-b2d0d.firebaseapp.com",
@@ -23,62 +41,43 @@ export const FIREBASE_CONFIG = {
   measurementId: "G-GQYXET1B4J"
 };
 
-export const APP_ID = "guess-the-drawing-prod";
+export const APP_ID            = "guess-the-drawing-prod";
 export const INITIAL_AUTH_TOKEN = null;
 
-// Words split by difficulty
-export const WORDS_BY_DIFFICULTY = {
-  easy: [
-    "cat", "dog", "sun", "tree", "fish", "bird", "house", "car", "hat", "apple",
-    "book", "cup", "eye", "arm", "bee", "egg", "fox", "ant", "pig", "cow",
-    "duck", "star", "moon", "cake", "ball", "boat", "door", "hand", "shoe", "rain",
-    "fire", "leaf", "ring", "flag", "key", "box", "bed", "fan", "bow", "map",
-    "bag", "bat", "bus", "cap", "ear", "fly", "gun", "jar", "leg", "lip",
-    "net", "owl", "pen", "pot", "saw", "ski", "top", "web", "zip", "bow",
-    "frog", "bear", "lion", "rose", "corn", "bone", "lamp", "ship", "drum", "bell",
-    "crab", "swan", "fork", "sock", "coat", "tent", "rock", "wolf", "worm", "seed",
-    "cloud", "candy", "chair", "clock", "crown", "dress", "ghost", "grape", "horse", "knife",
-    "mouse", "peach", "piano", "plane", "robot", "shark", "shirt", "skate", "sleep", "smile",
-    "snake", "spoon", "sword", "tiger", "toast", "train", "truck", "tulip", "whale", "witch"
-  ],
-  medium: [
-    "airplane", "alligator", "ambulance", "backpack", "balloon", "banana", "bandage",
-    "baseball", "basket", "bathtub", "beach", "bicycle", "bottle", "bridge", "broom",
-    "bucket", "butterfly", "cactus", "camera", "campfire", "candle", "castle",
-    "cheese", "cherry", "chicken", "chimney", "chocolate", "clown", "coconut",
-    "cookie", "crocodile", "diamond", "dinosaur", "dolphin", "dragon", "eagle",
-    "elephant", "envelope", "feather", "fireworks", "flashlight", "flower", "forest",
-    "giraffe", "glasses", "glove", "grapes", "guitar", "hammer", "helicopter", "helmet",
-    "igloo", "island", "jellyfish", "kite", "ladder", "lemon", "lizard", "mango",
-    "mask", "mermaid", "mirror", "monster", "mountain", "mushroom", "octopus",
-    "onion", "paint", "panda", "pencil", "penguin", "pineapple", "pizza", "pumpkin",
-    "pyramid", "rabbit", "rainbow", "rocket", "sailboat", "sandwich", "scissors",
-    "skateboard", "skull", "snail", "snowman", "spider", "squirrel", "strawberry",
-    "sunglasses", "table", "toothbrush", "torch", "tower", "turtle", "umbrella",
-    "unicorn", "violin", "volcano", "waffle", "waterfall", "windmill", "wizard", "zebra"
-  ],
-  hard: [
-    "acorn", "apron", "asteroid", "astronaut", "barbecue", "binoculars", "blimp",
-    "bouquet", "brain", "canyon", "caterpillar", "chameleon", "chihuahua", "compass",
-    "crane", "croissant", "crystal", "cupboard", "dragonfly", "drone", "earring",
-    "factory", "faucet", "flagpole", "flamingo", "fountain", "freeway", "garage",
-    "geyser", "globe", "goggles", "gondola", "hairbrush", "hammock", "harp",
-    "headdress", "highway", "hurricane", "jigsaw", "kayak", "ketchup", "laundry",
-    "lighthouse", "limousine", "mansion", "microscope", "mitten", "narwhal", "necklace",
-    "nightgown", "nutcracker", "oatmeal", "origami", "pacifier", "pancake", "parade",
-    "parasol", "peacock", "pendant", "periscope", "phoenix", "photograph", "pier",
-    "pinwheel", "poodle", "popcorn", "popsicle", "pottery", "puppet", "quilt",
-    "raccoon", "refrigerator", "safari", "saxophone", "scarecrow", "scorpion",
-    "seahorse", "sheriff", "shovel", "slipper", "sparkler", "sphinx", "starfish",
-    "stethoscope", "submarine", "sushi", "teacup", "telescope", "tombstone",
-    "tornado", "typewriter", "wagon", "walrus", "warehouse", "wheelbarrow",
-    "whistle", "wreath", "yogurt", "zipper"
-  ]
-};
-
-// Flat word list (all difficulties combined) — used as fallback
+// ─── Words ─────────────────────────────────────────────────────────────────────
 export const WORDS = [
-  ...WORDS_BY_DIFFICULTY.easy,
-  ...WORDS_BY_DIFFICULTY.medium,
-  ...WORDS_BY_DIFFICULTY.hard
+  "airplane","alligator","ambulance","angel","ant","apple","arm","axe","backpack","balloon",
+  "banana","bandage","barn","baseball","basket","bat","bathtub","beach","bear","bed","bee",
+  "beehive","bell","bench","bicycle","bird","book","boot","bottle","bow","bowl","box","bread",
+  "bridge","broom","bucket","bus","butterfly","cactus","cake","camera","campfire","candle",
+  "candy","cap","car","carrot","castle","cat","cave","chair","cheese","cherry","chicken",
+  "chimney","chocolate","cloud","clown","coconut","comb","computer","cookie","cow","crab",
+  "crocodile","crown","cup","cupcake","diamond","dinosaur","dog","dolphin","door","dragon",
+  "drum","duck","eagle","ear","egg","elephant","engine","envelope","eye","face","farm",
+  "feather","fence","fire","fireworks","fish","flag","flashlight","flower","flute","forest",
+  "fork","fox","frog","fruit","ghost","giraffe","glasses","glove","goat","grapes","guitar",
+  "hammer","hand","hat","helicopter","helmet","honey","horse","hospital","house","igloo",
+  "island","jellyfish","jungle","key","kite","ladder","lamp","leaf","lemon","lion","lizard",
+  "lock","mango","map","mask","mermaid","milk","mirror","monster","moon","motorcycle",
+  "mountain","mushroom","needle","nest","ocean","octopus","onion","owl","paint","palm",
+  "panda","pants","paper","peach","pear","pencil","penguin","phone","piano","pig","pineapple",
+  "pizza","plane","plant","plate","pumpkin","pyramid","queen","rabbit","rain","rainbow","ring",
+  "robot","rocket","rose","rug","sailboat","sand","sandwich","scarf","scissors","shark",
+  "sheep","ship","shoe","skateboard","skull","snail","snake","snowman","soap","sock","spider",
+  "spoon","sprout","squirrel","star","strawberry","sun","sunglasses","swan","sword","table",
+  "tiger","toothbrush","torch","tower","train","tree","truck","turtle","umbrella","unicorn",
+  "vase","violin","volcano","waffle","watch","waterfall","whale","wheel","windmill","window",
+  "wing","wizard","yarn","zebra","zipper","acorn","apron","ballet","blender","blimp","bouquet",
+  "brain","canyon","compass","corn","couch","crane","crystal","cupboard","desk","dragonfly",
+  "drone","earring","factory","faucet","flagpole","fountain","garage","garden","globe",
+  "goggles","gondola","hairbrush","hammock","harp","highway","hurricane","jigsaw","kayak",
+  "lighthouse","mansion","mitten","narwhal","necklace","nutcracker","oatmeal","origami",
+  "pancake","parade","parasol","peacock","periscope","phoenix","photograph","pillow","pinwheel",
+  "popcorn","popsicle","pottery","puppet","quilt","raccoon","refrigerator","safari","saxophone",
+  "scarecrow","scorpion","seahorse","shovel","slipper","sparkler","starfish","stethoscope",
+  "submarine","sushi","teacup","telescope","tombstone","tornado","typewriter","wagon","walrus",
+  "wheelbarrow","whistle","wreath","yogurt","astronaut","barbecue","binoculars","caterpillar",
+  "chameleon","croissant","flamingo","lightbulb","magnet","marshmallow","microscope","moose",
+  "muffin","pajamas","pepper","rhino","spacesuit","spaghetti","stapler","sunflower","superhero",
+  "tadpole","toaster","treadmill","waterfall","yogurt"
 ];
