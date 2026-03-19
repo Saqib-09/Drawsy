@@ -167,16 +167,21 @@ const showScreen = id => {
 const initializeAuthAndUI = async () => {
   statusMessage.textContent = "Connecting…";
   createRoomBtn.disabled = joinRoomBtn.disabled = true;
+  createRoomBtn.textContent = "Connecting…";
   try {
     const r = INITIAL_AUTH_TOKEN
       ? await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN)
       : await signInAnonymously(auth);
     user = r.user;
-    statusMessage.textContent = "Ready! Enter your name to begin.";
+    statusMessage.textContent = "";
     createRoomBtn.disabled = joinRoomBtn.disabled = false;
+    createRoomBtn.textContent = "Create Room";
   } catch (e) {
-    statusMessage.textContent = "Failed to connect. Refresh and try again.";
-    console.error(e);
+    // Always re-enable on failure so the user can retry
+    createRoomBtn.disabled = joinRoomBtn.disabled = false;
+    createRoomBtn.textContent = "Create Room";
+    statusMessage.textContent = "⚠️ Could not connect. Make sure Anonymous Auth is enabled in your Firebase Console, then refresh.";
+    console.error("Firebase auth error:", e);
   }
 };
 
