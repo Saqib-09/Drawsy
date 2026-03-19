@@ -199,7 +199,7 @@ const renderLobby = () => {
     const badge  = myTeam
       ? `<span class="team-badge border" style="background:${myTeam.bg};color:${myTeam.text};border-color:${myTeam.border}">${myTeam.label}</span>`
       : '';
-    const assignBtns = (isOwner && mode === MODE_TEAMS && !isMe)
+    const assignBtns = (isOwner && mode === MODE_TEAMS)
       ? `<div class="flex gap-1 ml-auto">${teams.map(t =>
           `<button onclick="assignTeam('${p.id}','${t.id}')"
             class="team-assign-btn ${(t.members||[]).includes(p.id) ? 'active' : ''}"
