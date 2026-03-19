@@ -26,8 +26,6 @@ const usernameInput      = document.getElementById("username-input");
 const statusMessage      = document.getElementById("status-message");
 const waitingInline      = document.getElementById('waiting-inline');
 const roomIdSpanInline   = document.getElementById('room-id-inline');
-const copyBtnInline      = document.getElementById('copy-btn-inline');
-const copyTip            = document.getElementById('copy-tip');
 const playerStatusInline = document.getElementById('player-status-inline');
 const lobbyPlayerList    = document.getElementById('lobby-player-list');
 const lobbyModeSelect    = document.getElementById('lobby-mode-select');
@@ -40,7 +38,7 @@ const chatBadge          = document.getElementById('chat-badge');
 
 const GAME_SCREEN_ID = "game-play-area";
 
-// ─── Gameplay DOM (lazy) ────────────────────────────────────────────────────────
+// ─── Gameplay DOM (lazy) ───────────────────────────────────────────────────────
 let gameInfoEl, turnIndicatorTop, roundNumberTop, timerDisplayTop, progressEl;
 let canvas, ctx, drawingControls, guessingControls, wordToDrawEl;
 let brushSizeInput, brushColorInput, clearCanvasBtn, undoBtn, eraserBtn, brushBtn;
@@ -83,17 +81,21 @@ const getGameUIElements = () => {
 };
 
 // ─── Game State ────────────────────────────────────────────────────────────────
-let unsubscribeGame     = null;
-let gameId              = null;
-let user                = null;
-let username            = null;
-let gameData            = null;
-let triedStart          = false;
-let lastPlayerLeftSeen  = null;
-let lastTurnKey         = '';
-let lastChatLen         = 0;
+let unsubscribeGame    = null;
+let gameId             = null;
+let user               = null;
+let username           = null;
+let gameData           = null;
+let lastPlayerLeftSeen = null;
+let lastChatLen        = 0;
 
-let timerInterval = null;
+// Timer tracking — Bug C3: only restart timer when deadline actually changes
+let timerInterval     = null;
+let currentDeadline   = null;
+let lastTurnKey       = '';
+let lastTickSec       = -1;
+
+// Drawing state
 let isDrawing     = false;
 let currentStroke = [];
 let lastPosition  = { x: 0, y: 0 };
@@ -102,61 +104,60 @@ let brushSize     = 5;
 const ERASER_SIZE = 20;
 let isErasing     = false;
 let isRevealing   = false;
-let lastTickSec   = -1;
 
 // Batched stroke buffer
-let pendingStrokes   = [];
-const scheduleFlush  = debounce(flushStrokes, STROKE_FLUSH_MS);
+let pendingStrokes  = [];
+const scheduleFlush = debounce(flushStrokes, STROKE_FLUSH_MS);
 
 // ─── Audio ─────────────────────────────────────────────────────────────────────
 let audioCtx = null;
-const ac = () => { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return audioCtx; };
+const ac = () => {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+};
 const tone = (freq, type, dur, vol = 0.3, delay = 0) => {
   try {
-    const ctx  = ac(), osc = ctx.createOscillator(), g = ctx.createGain();
-    osc.connect(g); g.connect(ctx.destination);
-    osc.type = type; osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
-    g.gain.setValueAtTime(vol, ctx.currentTime + delay);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
-    osc.start(ctx.currentTime + delay); osc.stop(ctx.currentTime + delay + dur);
+    const a = ac(), osc = a.createOscillator(), g = a.createGain();
+    osc.connect(g); g.connect(a.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, a.currentTime + delay);
+    g.gain.setValueAtTime(vol, a.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + delay + dur);
+    osc.start(a.currentTime + delay); osc.stop(a.currentTime + delay + dur);
   } catch (_) {}
 };
 const sfx = {
   correct : () => { tone(523,'sine',0.12,0.35); tone(659,'sine',0.12,0.35,0.12); tone(784,'sine',0.25,0.35,0.24); },
-  wrong   : () => { tone(200,'square',0.12,0.15); },
+  wrong   : () => { tone(200,'square',0.10,0.15); },
   close   : () => { tone(660,'triangle',0.08,0.2); tone(440,'triangle',0.08,0.2,0.08); },
-  tick    : () => { tone(880,'sine',0.05,0.1); },
+  tick    : () => { tone(880,'sine',0.04,0.08); },
   newTurn : () => { tone(440,'sine',0.08,0.2); tone(550,'sine',0.15,0.2,0.1); },
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-const isMobile  = () => window.matchMedia('(max-width:767.98px)').matches;
-const gameRef   = () => doc(db, "artifacts", APP_ID, "public", "data", "games", gameId);
+const isMobile = () => window.matchMedia('(max-width:767.98px)').matches;
+const gameRef  = () => doc(db, "artifacts", APP_ID, "public", "data", "games", gameId);
 
-/** Which team (if any) does a uid belong to? */
-const teamOf = (uid) => (gameData?.teams || []).find(t => (t.members || []).includes(uid));
+const teamOf = (uid, data = gameData) =>
+  (data?.teams || []).find(t => (t.members || []).includes(uid));
 
-/** In Teams mode, can this player guess right now? */
-const canGuesNow = () => {
+const canGuessNow = () => {
   if (!gameData || gameData.currentPlayer === user.uid) return false;
-  if (!gameData.word) return false;
+  if (!gameData.word || gameData.word === '__advance__') return false;
   if (gameData.mode === MODE_TEAMS) {
     const myTeam     = teamOf(user.uid);
     const drawerTeam = teamOf(gameData.currentPlayer);
-    // You can only guess if you're on the SAME team as the drawer
-    // and NOT the drawer themselves
     if (!myTeam || !drawerTeam) return false;
     return myTeam.id === drawerTeam.id;
   }
-  return true; // FFA: anyone non-drawer can guess
+  return true;
 };
 
-/** Has this player already guessed correctly this turn? */
 const alreadyGuessed = () => !!(gameData?.guessedBy || {})[user.uid];
 
 // ─── Screen Switching ──────────────────────────────────────────────────────────
 const screens = document.querySelectorAll('#screens > div, #screens > section');
-const showScreen = (id) => {
+const showScreen = id => {
   screens.forEach(s => s.classList.add("hidden"));
   document.getElementById(id)?.classList.remove("hidden");
   document.getElementById("topbar")?.classList.toggle("hidden", id !== GAME_SCREEN_ID);
@@ -187,70 +188,58 @@ const renderLobby = () => {
   const mode    = gameData.mode || MODE_FFA;
   const teams   = gameData.teams || TEAM_COLORS.map(c => ({ ...c, members: [] }));
 
-  // Player list
   lobbyPlayerList.innerHTML = players.map(p => {
     const isMe   = p.id === user.uid;
-    const myTeam = (teams).find(t => (t.members || []).includes(p.id));
-    const badge  = myTeam ? `<span class="team-badge border" style="background:${myTeam.bg};color:${myTeam.text};border-color:${myTeam.border}">${myTeam.label}</span>` : '';
-    return `<div class="lobby-player ${isMe ? 'lobby-player-me' : ''}">
-      <span class="font-semibold">${p.name}${isMe ? ' (you)' : ''}</span>
-      ${badge}
-      ${isOwner && mode === MODE_TEAMS && !isMe ? `
-        <div class="flex gap-1 ml-auto">
-          ${teams.map(t => `<button onclick="assignTeam('${p.id}','${t.id}')"
+    const myTeam = teams.find(t => (t.members || []).includes(p.id));
+    const badge  = myTeam
+      ? `<span class="team-badge border" style="background:${myTeam.bg};color:${myTeam.text};border-color:${myTeam.border}">${myTeam.label}</span>`
+      : '';
+    const assignBtns = (isOwner && mode === MODE_TEAMS && !isMe)
+      ? `<div class="flex gap-1 ml-auto">${teams.map(t =>
+          `<button onclick="assignTeam('${p.id}','${t.id}')"
             class="team-assign-btn ${(t.members||[]).includes(p.id) ? 'active' : ''}"
             style="${(t.members||[]).includes(p.id) ? `background:${t.bg};border-color:${t.border};color:${t.text}` : ''}"
-            >${t.label.split(' ')[0]}</button>`).join('')}
-        </div>` : ''}
+          >${t.label.split(' ')[0]}</button>`
+        ).join('')}</div>`
+      : '';
+    return `<div class="lobby-player ${isMe ? 'lobby-player-me' : ''}">
+      <span class="font-semibold">${p.name}${isMe ? ' (you)' : ''}</span>
+      ${badge}${assignBtns}
     </div>`;
   }).join('');
 
-  // Mode selector (owner only)
-  if (lobbyModeSelect) {
-    lobbyModeSelect.value = mode;
-    lobbyModeSelect.disabled = !isOwner;
-  }
+  if (lobbyModeSelect) { lobbyModeSelect.value = mode; lobbyModeSelect.disabled = !isOwner; }
+  if (lobbyTeamSetup)  lobbyTeamSetup.classList.toggle('hidden', mode !== MODE_TEAMS);
 
-  // Team setup section
-  if (lobbyTeamSetup) {
-    lobbyTeamSetup.classList.toggle('hidden', mode !== MODE_TEAMS);
-  }
-
-  // Start button
   if (lobbyStartBtn) {
     lobbyStartBtn.classList.toggle('hidden', !isOwner);
     const canStart = players.length >= MIN_PLAYERS &&
       (mode !== MODE_TEAMS || teamsValid(players, teams));
     lobbyStartBtn.disabled = !canStart;
-    lobbyStartBtn.title = canStart ? '' :
-      mode === MODE_TEAMS ? 'Assign all players to a team first' : `Need at least ${MIN_PLAYERS} players`;
+    lobbyStartBtn.title = canStart ? ''
+      : mode === MODE_TEAMS ? 'Assign all players to a team first'
+      : `Need at least ${MIN_PLAYERS} players`;
   }
 
-  playerStatusInline.textContent =
-    players.length < MIN_PLAYERS
-      ? `Waiting for players… (${players.length}/${MIN_PLAYERS} minimum)`
-      : `${players.length} player${players.length !== 1 ? 's' : ''} in lobby`;
+  playerStatusInline.textContent = players.length < MIN_PLAYERS
+    ? `Waiting for players… (${players.length}/${MIN_PLAYERS} minimum)`
+    : `${players.length} player${players.length !== 1 ? 's' : ''} in lobby`;
 };
 
-const teamsValid = (players, teams) => {
-  // Every player must be assigned to a team, and each team must have ≥1 member
-  const assigned = players.every(p => teams.some(t => (t.members || []).includes(p.id)));
-  const allPopulated = teams.every(t => (t.members || []).length >= 1);
-  return assigned && allPopulated;
-};
+const teamsValid = (players, teams) =>
+  players.every(p => teams.some(t => (t.members || []).includes(p.id))) &&
+  teams.every(t => (t.members || []).length >= 1);
 
-// Exposed globally for inline onclick
 window.assignTeam = async (uid, teamId) => {
   if (gameData?.owner !== user.uid) return;
   await runTransaction(db, async tx => {
     const snap = await tx.get(gameRef());
     if (!snap.exists()) return;
-    const d     = snap.data();
-    const teams = (d.teams || TEAM_COLORS.map(c => ({ ...c, members: [] }))).map(t => ({
+    const teams = (snap.data().teams || TEAM_COLORS.map(c => ({ ...c, members: [] }))).map(t => ({
       ...t,
       members: t.id === teamId
-        ? [...new Set([...(t.members || []), uid])]  // add to target
-        : (t.members || []).filter(m => m !== uid)   // remove from others
+        ? [...new Set([...(t.members || []), uid])]
+        : (t.members || []).filter(m => m !== uid)
     }));
     tx.update(gameRef(), { teams });
   });
@@ -265,20 +254,18 @@ const startGame = async () => {
     if (d.state !== "waiting") return;
     if ((d.players || []).length < MIN_PLAYERS) throw new Error("Not enough players");
 
-    const mode   = d.mode || MODE_FFA;
-    const teams  = d.teams || [];
-    const order  = buildDrawOrder(d.players, mode, teams);
-    const choices = pickChoices(WORDS, d.usedWords || []);
+    const mode  = d.mode || MODE_FFA;
+    const teams = d.teams || [];
+    const order = buildDrawOrder(d.players, mode, teams);
 
     tx.update(gameRef(), {
       state: "playing",
-      mode,
-      teams,
+      mode, teams,
       drawOrder: order,
       drawOrderIndex: 0,
       currentPlayer: order[0],
       word: null,
-      wordChoices: choices,
+      wordChoices: pickChoices(WORDS, d.usedWords || []),
       usedWords: d.usedWords || [],
       round: 1,
       strokes: [],
@@ -287,40 +274,44 @@ const startGame = async () => {
       turnEndsAt: null,
       revealedLetters: [],
       lastGuesser: null,
-      guessedBy: {},       // uid → true (who has guessed correctly)
-      firstGuesser: null,  // uid of first correct guesser this turn
+      guessedBy: {},
+      firstGuesser: null,
     });
-  }).catch(err => {
-    console.error("Start failed:", err);
-    statusMessage.textContent = err.message;
-  });
+  }).catch(err => { console.error("Start failed:", err); statusMessage.textContent = err.message; });
 };
 
-const nextTurn = async () => {
+// Bug C1 fix: nextTurn accepts optional override for the draw order (used after player leaves)
+const nextTurn = async (overrideOrder = null) => {
   await runTransaction(db, async tx => {
     const snap = await tx.get(gameRef());
     if (!snap.exists()) return;
-    const d       = snap.data();
-    const order   = d.drawOrder || [];
-    const idx     = d.drawOrderIndex ?? 0;
-    const nextIdx = (idx + 1) % order.length;
-    const nextId  = order[nextIdx];
+    const d = snap.data();
+    if (d.state !== 'playing') return; // guard: don't advance if game ended
 
-    // A full cycle completes when we wrap back to index 0
+    const order   = overrideOrder || d.drawOrder || [];
+    if (!order.length) return;
+
+    const idx     = d.drawOrderIndex ?? 0;
+    // Find the current index in the (possibly updated) order
+    const currInOrder = order.indexOf(d.currentPlayer);
+    const baseIdx  = currInOrder >= 0 ? currInOrder : idx;
+    const nextIdx  = (baseIdx + 1) % order.length;
+    const nextId   = order[nextIdx];
+
     let newRound = d.round;
     if (nextIdx === 0) newRound++;
 
     if (newRound > MAX_ROUNDS) {
-      tx.update(gameRef(), { state: "finished", scores: (d.players || []).map(p => ({ name: p.name, score: p.score, team: teamOf_data(p.id, d) })) });
+      tx.update(gameRef(), { state: "finished", scores: (d.players || []).map(p => ({ name: p.name, score: p.score })) });
       return;
     }
 
-    const choices = pickChoices(WORDS, d.usedWords || []);
     tx.update(gameRef(), {
+      drawOrder: order, // persist any updated order (e.g. after player leaves)
       drawOrderIndex: nextIdx,
       currentPlayer: nextId,
       word: null,
-      wordChoices: choices,
+      wordChoices: pickChoices(WORDS, d.usedWords || []),
       round: newRound,
       strokes: [],
       wordPickEndsAt: Date.now() + WORD_PICK_MS,
@@ -333,10 +324,7 @@ const nextTurn = async () => {
   });
 };
 
-// Pure-data version of teamOf (no global gameData dependency)
-const teamOf_data = (uid, d) => (d.teams || []).find(t => (t.members || []).includes(uid));
-
-const chooseWord = async (selected) => {
+const chooseWord = async selected => {
   if (!gameData || gameData.currentPlayer !== user.uid) return;
   await runTransaction(db, async tx => {
     const snap = await tx.get(gameRef());
@@ -356,21 +344,23 @@ const chooseWord = async (selected) => {
 
 const revealLetter = async () => {
   if (!gameData?.word || gameData.state !== "playing") { isRevealing = false; return; }
-  const word      = gameData.word;
-  const revealed  = gameData.revealedLetters || [];
-  const unrevealed = [...Array(word.length).keys()].filter(i => !revealed.includes(i));
+  const unrevealed = [...Array(gameData.word.length).keys()]
+    .filter(i => !(gameData.revealedLetters || []).includes(i));
   if (unrevealed.length) {
     try {
-      await updateDoc(gameRef(), { revealedLetters: arrayUnion(unrevealed[Math.floor(Math.random() * unrevealed.length)]) });
+      await updateDoc(gameRef(), {
+        revealedLetters: arrayUnion(unrevealed[Math.floor(Math.random() * unrevealed.length)])
+      });
     } finally { isRevealing = false; }
   } else { isRevealing = false; }
 };
 
+// ─── Bug A fix: submitGuess never uses sentinels ───────────────────────────────
 const submitGuess = async () => {
-  if (!canGuesNow() || alreadyGuessed()) return;
+  if (!canGuessNow() || alreadyGuessed()) return;
   if (!gameData.word) { if (guessStatusEl) guessStatusEl.textContent = "Word not chosen yet!"; return; }
 
-  const guess       = (guessInput?.value || '').trim().toLowerCase();
+  const guess = (guessInput?.value || '').trim().toLowerCase();
   if (!guess) return;
   if (guessInput) guessInput.value = '';
   if (guessStatusEl) guessStatusEl.textContent = '';
@@ -380,61 +370,78 @@ const submitGuess = async () => {
   if (!guesser) return;
 
   if (guess === correctWord) {
-    // ── Correct ──────────────────────────────────────────────────────────────
     sfx.correct();
-    const guesserId      = user.uid;
-    const drawerId       = gameData.currentPlayer;
-    const timeElapsed    = Date.now() - (gameData.turnEndsAt - TURN_MS);
-    let basePoints       = 0;
+    const guesserId   = user.uid;
+    const drawerId    = gameData.currentPlayer;
+    const timeElapsed = Date.now() - (gameData.turnEndsAt - TURN_MS);
+    let basePoints    = 0;
     for (const tier of SCORING_TIERS) if (timeElapsed <= tier.time) { basePoints = tier.points; break; }
 
-    const isFirst     = !gameData.firstGuesser;
-    const guesserPts  = Math.round(basePoints * (isFirst ? 1 : LATE_GUESSER_MULT));
-    const drawerPts   = isFirst ? Math.round(basePoints * DRAWER_POINTS_MULT) : 0;
+    const isFirst    = !gameData.firstGuesser;
+    const guesserPts = Math.round(basePoints * (isFirst ? 1 : LATE_GUESSER_MULT));
+    const drawerPts  = isFirst ? Math.round(basePoints * DRAWER_POINTS_MULT) : 0;
+
+    let shouldAdvance = false;
 
     await runTransaction(db, async tx => {
       const snap = await tx.get(gameRef());
       if (!snap.exists()) return;
-      const d           = snap.data();
-      if ((d.guessedBy || {})[guesserId]) return; // race: already guessed
+      const d = snap.data();
+      if ((d.guessedBy || {})[guesserId]) return; // already counted, bail
 
-      const updatedPlayers = (d.players || []).map(p => {
+      const newGuessedBy   = { ...(d.guessedBy || {}), [guesserId]: true };
+      const activePlayers  = d.players || [];
+      const nonDrawers     = activePlayers.filter(p => p.id !== drawerId);
+
+      // FFA: advance when all non-drawers have guessed
+      // Teams: advance immediately after the one teammate guesses
+      const allGuessed = nonDrawers.every(p => newGuessedBy[p.id]);
+      shouldAdvance    = allGuessed || d.mode === MODE_TEAMS;
+
+      const updatedPlayers = activePlayers.map(p => {
         if (p.id === guesserId) return { ...p, score: p.score + guesserPts };
         if (p.id === drawerId)  return { ...p, score: p.score + drawerPts };
         return p;
       });
 
-      // In FFA: check if all non-drawers have now guessed — if so, advance turn
-      const nonDrawers       = (d.players || []).filter(p => p.id !== drawerId);
-      const newGuessedBy     = { ...(d.guessedBy || {}), [guesserId]: true };
-      const allGuessed       = nonDrawers.every(p => newGuessedBy[p.id]);
-
-      // In Teams mode: only 1 guesser per turn (the teammate)
-      const shouldAdvance    = allGuessed || d.mode === MODE_TEAMS;
-
       tx.update(gameRef(), {
         players: updatedPlayers,
         guessedBy: newGuessedBy,
         firstGuesser: d.firstGuesser || guesserId,
-        chat: arrayUnion({ id: "system", name: "", text: `✅ <strong>${guesser.name}</strong> guessed it! (+${guesserPts} pts)`, timestamp: Date.now() }),
-        ...(shouldAdvance ? { word: "__advance__" } : {}) // sentinel to trigger nextTurn
+        // Bug A fix: never set word to a sentinel value
+        // The UI reflects alreadyGuessed() immediately via local gameData update;
+        // if shouldAdvance, we call nextTurn() below after the transaction commits.
+        chat: arrayUnion({
+          id: "system", name: "",
+          text: `✅ <strong>${guesser.name}</strong> guessed it! (+${guesserPts} pts)`,
+          timestamp: Date.now()
+        }),
       });
-    }).then(async () => {
-      // Check if we should advance the turn
-      const fresh = await new Promise(res => {
-        const u = onSnapshot(gameRef(), s => { u(); res(s.data()); });
-      });
-      if (fresh?.word === "__advance__") await nextTurn();
-    }).catch(e => console.error("Guess tx:", e));
-  } else {
-    // ── Wrong ────────────────────────────────────────────────────────────────
-    const close = isCloseGuess(guess, correctWord);
-    if (close) { sfx.close(); if (guessStatusEl) { guessStatusEl.textContent = "🔥 So close!"; setTimeout(() => { if(guessStatusEl) guessStatusEl.textContent = ''; }, 2000); } }
-    else sfx.wrong();
+    });
 
+    // Call nextTurn AFTER transaction commits, not inside it
+    if (shouldAdvance) await nextTurn();
+
+  } else {
+    // Wrong guess
+    const close = isCloseGuess(guess, correctWord);
+    if (close) {
+      sfx.close();
+      if (guessStatusEl) {
+        guessStatusEl.textContent = "🔥 So close!";
+        setTimeout(() => { if (guessStatusEl) guessStatusEl.textContent = ''; }, 2000);
+      }
+    } else { sfx.wrong(); }
+
+    // Bug C8 fix: wrong guesses rendered with distinct style via isIncorrect flag
     await updateDoc(gameRef(), {
       lastGuesser: { id: user.uid, name: guesser.name },
-      chat: arrayUnion({ id: user.uid, name: guesser.name, text: `❌ ${guess}${close ? ' 🔥' : ''}`, isIncorrect: true, timestamp: Date.now() })
+      chat: arrayUnion({
+        id: user.uid, name: guesser.name,
+        text: `${guess}${close ? ' 🔥' : ''}`,
+        isIncorrect: true,
+        timestamp: Date.now()
+      })
     });
   }
 };
@@ -444,14 +451,15 @@ const drawLine = (x1, y1, x2, y2, color, size, erase = false) => {
   if (!ctx) return;
   ctx.save();
   ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
-  ctx.strokeStyle  = erase ? 'rgba(0,0,0,1)' : color;
-  ctx.lineWidth    = size; ctx.lineCap = ctx.lineJoin = "round";
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.closePath();
-  ctx.restore();
+  ctx.strokeStyle = erase ? 'rgba(0,0,0,1)' : color;
+  ctx.lineWidth = size; ctx.lineCap = ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  ctx.stroke(); ctx.closePath(); ctx.restore();
 };
 
 const canDrawNow = () =>
   !!gameData && gameData.state === "playing" && !!gameData.word &&
+  gameData.word !== '__advance__' &&
   gameData.currentPlayer === user.uid && Date.now() < (gameData.turnEndsAt || 0);
 
 const startDrawing = e => {
@@ -463,15 +471,16 @@ const startDrawing = e => {
 
 const draw = e => {
   if (!isDrawing || !canDrawNow()) return;
-  const { x, y }   = getCoordinates(e, canvas);
-  const erase        = isErasing;
-  const col          = erase ? null : brushColor;
-  const sz           = erase ? ERASER_SIZE : brushSize;
+  const { x, y } = getCoordinates(e, canvas);
+  const erase = isErasing;
+  const col   = erase ? null : brushColor;
+  const sz    = erase ? ERASER_SIZE : brushSize;
   currentStroke.push({ x, y });
   drawLine(lastPosition.x, lastPosition.y, x, y, col, sz, erase);
   lastPosition = { x, y };
   if (currentStroke.length >= MAX_STROKES) {
-    pendingStrokes.push({ points: [...currentStroke], color: col, size: sz, erase }); scheduleFlush();
+    pendingStrokes.push({ points: [...currentStroke], color: col, size: sz, erase });
+    scheduleFlush();
     currentStroke = [{ x, y }];
   }
   e.preventDefault();
@@ -481,7 +490,12 @@ const stopDrawing = () => {
   if (!isDrawing) return;
   if (currentStroke.length > 0 && canDrawNow()) {
     const erase = isErasing;
-    pendingStrokes.push({ points: [...currentStroke], color: erase ? null : brushColor, size: erase ? ERASER_SIZE : brushSize, erase });
+    pendingStrokes.push({
+      points: [...currentStroke],
+      color: erase ? null : brushColor,
+      size: erase ? ERASER_SIZE : brushSize,
+      erase
+    });
     scheduleFlush();
   }
   isDrawing = false; currentStroke = [];
@@ -529,10 +543,24 @@ const setupFirestoreListener = () => {
     if (!snap.exists()) return;
     gameData = snap.data();
 
+    // Bug B fix: handle playerLeft without halting the whole game
     const leaver = gameData.playerLeft;
     if (leaver && leaver !== username && leaver !== lastPlayerLeftSeen) {
       lastPlayerLeftSeen = leaver;
-      handleRemotePlayerLeft(leaver); return;
+      handlePlayerLeft(leaver);
+      // Don't return — continue rendering so remaining players see updated state
+    }
+
+    // Bug C1 fix: if the drawer left and set currentPlayer to '__gone__',
+    // the elected remaining player (lowest uid) advances the turn
+    if (gameData.state === "playing" && gameData.currentPlayer === '__gone__') {
+      const activeIds  = (gameData.players || []).map(p => p.id);
+      const sortedIds  = [...activeIds].sort();
+      if (sortedIds[0] === user.uid) {
+        const newOrder = (gameData.drawOrder || []).filter(id => activeIds.includes(id));
+        await nextTurn(newOrder.length ? newOrder : null);
+      }
+      return; // wait for the nextTurn snapshot to re-render
     }
 
     if      (gameData.state === "waiting")  handleWaitingState();
@@ -543,9 +571,59 @@ const setupFirestoreListener = () => {
   }, e => console.error("Snapshot error:", e));
 };
 
+// ─── Bug B fix: player leaves — show notification, continue game ───────────────
+const handlePlayerLeft = async (leaverName = "A player") => {
+  // Show a non-blocking toast/banner instead of a modal that forces everyone home
+  showLeaverNotice(leaverName);
+
+  // Clear the flag so it doesn't re-trigger
+  try { await updateDoc(gameRef(), { playerLeft: null }); } catch (_) {}
+
+  // If we're now below MIN_PLAYERS, the game can't continue — show modal
+  const remaining = (gameData?.players || []).length;
+  if (remaining < MIN_PLAYERS) {
+    getGameUIElements();
+    if (leftModalMsg) leftModalMsg.textContent = `${leaverName} left — not enough players to continue.`;
+    leftModal?.classList.remove("hidden");
+    return;
+  }
+
+  // If it was the leaver's turn and we're the "next" player responsible for advancing,
+  // we need to push the turn forward. We elect the player with the lowest uid to do this
+  // to avoid double-advances (Bug C1 fix).
+  if (gameData?.state === 'playing' && gameData?.currentPlayer) {
+    const activeIds    = (gameData.players || []).map(p => p.id);
+    const drawerGone   = !activeIds.includes(gameData.currentPlayer);
+    if (drawerGone) {
+      const sortedIds  = [...activeIds].sort();
+      const iAmElected = sortedIds[0] === user.uid;
+      if (iAmElected) {
+        // Remove the leaver from drawOrder and advance
+        const newOrder = (gameData.drawOrder || []).filter(id => activeIds.includes(id));
+        await nextTurn(newOrder.length ? newOrder : null);
+      }
+    }
+  }
+};
+
+const showLeaverNotice = name => {
+  // Render a system chat message — visible immediately without blocking gameplay
+  if (!chatMessagesContainer) return;
+  const el = document.createElement("div");
+  el.className = "chat-msg system-msg";
+  el.textContent = `⚠️ ${name} left the game`;
+  chatMessagesContainer.appendChild(el);
+  chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+};
+
 // ─── Chat ──────────────────────────────────────────────────────────────────────
 let chatUnread = 0;
-const openChat  = () => { document.body.classList.add('chat-open'); chatUnread = 0; chatBadge?.classList.add('hidden'); chatMessagesContainer && (chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight); };
+const openChat  = () => {
+  document.body.classList.add('chat-open');
+  chatUnread = 0;
+  chatBadge?.classList.add('hidden');
+  if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+};
 const closeChat = () => document.body.classList.remove('chat-open');
 const bumpUnread = () => {
   if (!isMobile() || document.body.classList.contains('chat-open')) return;
@@ -555,24 +633,40 @@ const bumpUnread = () => {
 
 const sendChatMessage = async text => {
   if (!text?.trim()) return;
-  await updateDoc(gameRef(), { chat: arrayUnion({ id: user.uid, name: username, text, timestamp: Date.now() }) });
+  await updateDoc(gameRef(), {
+    chat: arrayUnion({ id: user.uid, name: username, text, timestamp: Date.now() })
+  });
   if (chatInput) chatInput.value = '';
   if (isMobile() && !document.body.classList.contains('chat-open')) openChat();
 };
 
+// Bug C8 fix: render correct/incorrect guesses with distinct styles
 const renderChatDelta = () => {
   const chat = gameData?.chat || [];
   if (!chatMessagesContainer || chat.length <= lastChatLen) return;
+
   for (let i = lastChatLen; i < chat.length; i++) {
-    const m = chat[i];
-    const isMe  = m.id === user.uid;
+    const m       = chat[i];
+    const isMe    = m.id === user.uid;
     const isSystem = !m.name || m.name === "" || m.id === "system";
-    const wrap  = document.createElement("div");
-    wrap.className = "chat-msg " + (isSystem ? "system-msg" : isMe ? "chat-me self-end" : "chat-them self-start");
-    wrap.innerHTML  = isSystem ? m.text : `<span class="font-semibold">${m.name}:</span> ${m.text}`;
+    const wrap    = document.createElement("div");
+
+    if (isSystem) {
+      wrap.className = "chat-msg system-msg";
+      wrap.innerHTML = m.text;
+    } else if (m.isIncorrect) {
+      // Wrong guess — subtle styling, not a full bubble
+      wrap.className = `chat-msg wrong-guess ${isMe ? 'self-end' : 'self-start'}`;
+      wrap.innerHTML = `<span class="opacity-60 text-xs">${m.name}:</span> ❌ ${m.text}`;
+    } else {
+      wrap.className = `chat-msg ${isMe ? 'chat-me self-end' : 'chat-them self-start'}`;
+      wrap.innerHTML = `<span class="font-semibold">${m.name}:</span> ${m.text}`;
+    }
+
     chatMessagesContainer.appendChild(wrap);
     if (!isMe) bumpUnread();
   }
+
   lastChatLen = chat.length;
   chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 };
@@ -580,13 +674,21 @@ const renderChatDelta = () => {
 // ─── UI Updates ────────────────────────────────────────────────────────────────
 const updateUIForTurn = () => {
   if (!gameData) return;
-  const myTurn   = gameData.currentPlayer === user.uid;
-  const hasWord  = !!gameData.word;
-  const iCanGuess = canGuesNow() && !alreadyGuessed();
+  const myTurn    = gameData.currentPlayer === user.uid;
+  const hasWord   = !!gameData.word;
+  const iCanGuess = canGuessNow() && !alreadyGuessed();
 
-  // Drawing vs guessing panels
   drawingControls?.classList.toggle("hidden", !myTurn);
+
+  // Bug A fix: hide guess box if already guessed, regardless of hasWord
   guessingControls?.classList.toggle("hidden", myTurn || !hasWord || !iCanGuess);
+
+  // Spectate message for teams (opposing team) or already-guessed players
+  const spectateMsgEl = document.getElementById("spectate-msg");
+  if (spectateMsgEl) {
+    const showSpectate = !myTurn && hasWord && !iCanGuess && !alreadyGuessed();
+    spectateMsgEl.classList.toggle("hidden", !showSpectate);
+  }
 
   if (wordToDrawEl) wordToDrawEl.textContent = myTurn && hasWord ? gameData.word : '';
   if (canvas) canvas.style.pointerEvents = myTurn && hasWord ? "auto" : "none";
@@ -604,10 +706,10 @@ const updateUIForTurn = () => {
     });
   }
 
-  // Word hint (blanks) for guessers
+  // Word hint (blanks) — only show if word exists and it's not the drawer
   const hintEl = document.getElementById("word-hint");
   if (hintEl) {
-    if (gameData.word && !myTurn) {
+    if (hasWord && !myTurn) {
       const revealed = gameData.revealedLetters || [];
       const letters  = gameData.word.split('').map((ch, i) =>
         ch === ' '
@@ -616,27 +718,28 @@ const updateUIForTurn = () => {
             ? `<span class="letter-revealed">${ch.toUpperCase()}</span>`
             : `<span class="letter-blank">_</span>`
       );
-      hintEl.innerHTML = `<div class="flex flex-wrap justify-center gap-0.5">${letters.join('')}</div><div class="text-xs text-gray-400 mt-1">${gameData.word.length} letters</div>`;
+      hintEl.innerHTML = `<div class="flex flex-wrap justify-center gap-0.5">${letters.join('')}</div>
+        <div class="text-xs text-gray-400 mt-1">${gameData.word.replace(/ /g,'').length + (gameData.word.includes(' ') ? ' (2 words)' : ' letters')}</div>`;
     } else { hintEl.innerHTML = ''; }
   }
 
-  // Already guessed message
+  // Already-guessed status
   if (guessStatusEl) {
     if (alreadyGuessed() && !myTurn)
       guessStatusEl.textContent = "✅ You got it! Waiting for others…";
-    else if (myTurn && hasWord)
+    else
       guessStatusEl.textContent = '';
   }
 
-  // Teams mode: show who can guess
+  // Team banner
   if (gameData.mode === MODE_TEAMS && teamBannerEl) {
     const drawerTeam = teamOf(gameData.currentPlayer);
     const myTeam     = teamOf(user.uid);
     if (drawerTeam) {
       teamBannerEl.style.cssText = `background:${drawerTeam.bg};border-color:${drawerTeam.border};color:${drawerTeam.text}`;
-      teamBannerEl.textContent   = myTurn
+      teamBannerEl.textContent = myTurn
         ? `You're drawing for ${drawerTeam.label}!`
-        : myTeam?.id === drawerTeam.id && !myTurn
+        : myTeam?.id === drawerTeam.id
           ? `Guess the drawing for ${drawerTeam.label}!`
           : `${drawerTeam.label} is drawing — watch along!`;
       teamBannerEl.classList.remove('hidden');
@@ -648,14 +751,13 @@ const updateUIForTurn = () => {
   if (turnIndicatorTop) turnIndicatorTop.textContent = drawerName;
   if (roundNumberTop)   roundNumberTop.textContent   = `${gameData.round} / ${MAX_ROUNDS}`;
 
-  // Player roster sidebar
   renderPlayerRoster();
 };
 
 const renderPlayerRoster = () => {
   if (!playerRosterEl || !gameData) return;
-  const players  = gameData.players || [];
-  const teams    = gameData.teams   || [];
+  const players   = gameData.players || [];
+  const teams     = gameData.teams   || [];
   const guessedBy = gameData.guessedBy || {};
   playerRosterEl.innerHTML = players.map(p => {
     const isDrawer   = p.id === gameData.currentPlayer;
@@ -676,11 +778,13 @@ const handleWaitingState = () => {
   showScreen('welcome-screen');
   waitingInline?.classList.remove('hidden');
   clearInterval(timerInterval);
+  currentDeadline = null;
   if (roomIdSpanInline) roomIdSpanInline.textContent = gameId || '';
   lastChatLen = 0;
   renderLobby();
 };
 
+// Bug C3 fix: only restart timer when the deadline actually changes
 const handlePlayingState = () => {
   if (isMobile()) closeChat();
   waitingInline?.classList.add('hidden');
@@ -694,20 +798,28 @@ const handlePlayingState = () => {
 
   const turnKey = `${gameData.round}:${gameData.currentPlayer}`;
   if (lastTurnKey !== turnKey) {
-    lastTurnKey = turnKey; clearCanvas(); sfx.newTurn(); pendingStrokes = [];
+    lastTurnKey = turnKey;
+    clearCanvas();
+    sfx.newTurn();
+    pendingStrokes = [];
+    lastChatLen = Math.min(lastChatLen, (gameData.chat || []).length); // don't re-render old msgs
   }
   redrawCanvas(gameData.strokes || []);
 
-  clearInterval(timerInterval);
-  if (gameData.word) {
-    runTimer(gameData.turnEndsAt, handleTurnTimeout);
-  } else {
-    runTimer(gameData.wordPickEndsAt, async () => {
-      if (gameData.currentPlayer === user.uid && !gameData.word) {
-        const choices = gameData.wordChoices || [];
-        if (choices.length) await chooseWord(choices[Math.floor(Math.random() * choices.length)]);
-      }
-    });
+  // Bug C3 fix: determine the right deadline and only start a new timer if it changed
+  const newDeadline = gameData.word ? gameData.turnEndsAt : gameData.wordPickEndsAt;
+  if (newDeadline !== currentDeadline) {
+    currentDeadline = newDeadline;
+    if (gameData.word) {
+      runTimer(gameData.turnEndsAt, handleTurnTimeout);
+    } else {
+      runTimer(gameData.wordPickEndsAt, async () => {
+        if (gameData.currentPlayer === user.uid && !gameData.word) {
+          const choices = gameData.wordChoices || [];
+          if (choices.length) await chooseWord(choices[Math.floor(Math.random() * choices.length)]);
+        }
+      });
+    }
   }
 };
 
@@ -715,35 +827,32 @@ const handleFinishedState = () => {
   if (pendingStrokes.length) flushStrokes();
   clearCanvas();
   clearInterval(timerInterval);
+  currentDeadline = null;
   if (timerDisplayTop) timerDisplayTop.textContent = "--";
 
   const mode   = gameData.mode || MODE_FFA;
   const sorted = [...(gameData.players || [])].sort((a, b) => b.score - a.score);
 
   if (mode === MODE_TEAMS && gameData.teams?.length) {
-    // Team totals
-    const teamScores = gameData.teams.map(t => {
-      const total = (gameData.players || [])
+    const teamScores = gameData.teams.map(t => ({
+      ...t,
+      total: (gameData.players || [])
         .filter(p => (t.members || []).includes(p.id))
-        .reduce((s, p) => s + p.score, 0);
-      return { ...t, total };
-    }).sort((a, b) => b.total - a.total);
+        .reduce((s, p) => s + p.score, 0)
+    })).sort((a, b) => b.total - a.total);
 
-    const winner = teamScores[0];
-    const tied   = teamScores[0].total === teamScores[1]?.total;
-
-    let html = `<div class="text-xl font-bold mb-3">${tied ? '🤝 It\'s a tie!' : `🏆 ${winner.label} wins!`}</div>`;
+    const tied = teamScores.length >= 2 && teamScores[0].total === teamScores[1].total;
+    let html = `<div class="text-lg font-bold mb-3">${tied ? '🤝 It\'s a tie!' : `🏆 ${teamScores[0].label} wins!`}</div>`;
     html += teamScores.map((t, i) =>
       `<div class="team-score-row" style="background:${t.bg};border-color:${t.border};color:${t.text}">
         <span>${i === 0 && !tied ? '🥇 ' : i === 1 && !tied ? '🥈 ' : ''}${t.label}</span>
         <span class="font-bold">${t.total} pts</span>
       </div>`
     ).join('');
-    html += `<div class="mt-4 text-sm text-gray-500">Individual: ${sorted.map(p => `${p.name} (${p.score})`).join(' · ')}</div>`;
+    html += `<div class="mt-3 text-sm text-gray-400">Individual: ${sorted.map(p => `${p.name} (${p.score})`).join(' · ')}</div>`;
     if (finalScoresEl) finalScoresEl.innerHTML = html;
   } else {
-    // FFA leaderboard
-    const medals = ['🥇', '🥈', '🥉'];
+    const medals = ['🥇','🥈','🥉'];
     if (finalScoresEl) finalScoresEl.innerHTML = sorted.map((p, i) =>
       `<div class="score-row">${medals[i] || `${i+1}.`} <span class="font-semibold">${p.name}</span> — <span class="text-indigo-600 font-bold">${p.score} pts</span></div>`
     ).join('');
@@ -755,21 +864,25 @@ const handleFinishedState = () => {
 // ─── Timer ─────────────────────────────────────────────────────────────────────
 const runTimer = (deadline, onExpire) => {
   clearInterval(timerInterval);
+  lastTickSec = -1;
   const total = Math.max(0, (deadline || 0) - Date.now());
+
   const tick = () => {
     const remaining = Math.max(0, (deadline || 0) - Date.now());
     const elapsed   = total - remaining;
     const secs      = Math.ceil(remaining / 1000);
+
     if (timerDisplayTop) timerDisplayTop.textContent = formatSeconds(remaining);
     if (progressEl) progressEl.style.width = `${total ? 100 - Math.floor((remaining / total) * 100) : 0}%`;
 
-    // Tick in last 10s
     if (secs <= 10 && secs !== lastTickSec && remaining > 0) { lastTickSec = secs; sfx.tick(); }
 
-    // Reveal letters (drawer decides)
+    // Only drawer triggers reveals
     if (gameData?.word && gameData.currentPlayer === user.uid) {
       const due = Math.floor(elapsed / 20000);
-      if (due > (gameData.revealedLetters || []).length && !isRevealing) { isRevealing = true; revealLetter(); }
+      if (due > (gameData.revealedLetters || []).length && !isRevealing) {
+        isRevealing = true; revealLetter();
+      }
     }
 
     if (remaining <= 0) {
@@ -783,8 +896,8 @@ const runTimer = (deadline, onExpire) => {
   timerInterval = setInterval(tick, 200);
 };
 
+// Bug C1 fix: only current drawer advances timeout; also handles case where drawer left
 const handleTurnTimeout = async () => {
-  // Only the current drawer advances the turn
   if (!gameData || gameData.currentPlayer !== user.uid) return;
   try {
     await runTransaction(db, async tx => {
@@ -799,11 +912,8 @@ const handleTurnTimeout = async () => {
       let newRound  = d.round;
       if (nextIdx === 0) newRound++;
 
-      const revealWord = d.word || "(no word)";
-      const lastGuesserName = d.lastGuesser?.name || "Nobody";
-
       if (newRound > MAX_ROUNDS) {
-        tx.update(gameRef(), { state: "finished", scores: (d.players || []).map(p => ({ name: p.name, score: p.score })) });
+        tx.update(gameRef(), { state: "finished", scores: (d.players||[]).map(p=>({name:p.name,score:p.score})) });
         return;
       }
 
@@ -820,26 +930,22 @@ const handleTurnTimeout = async () => {
         lastGuesser: null,
         guessedBy: {},
         firstGuesser: null,
-        chat: arrayUnion({ id: "system", name: "", text: `⏰ Time's up! The word was "<strong>${revealWord}</strong>".`, timestamp: Date.now() })
+        chat: arrayUnion({
+          id: "system", name: "",
+          text: `⏰ Time's up! The word was "<strong>${d.word || '(none)'}</strong>".`,
+          timestamp: Date.now()
+        })
       });
     });
   } catch (e) { console.error("Timeout tx:", e); }
 };
 
-// ─── Remote player-left ────────────────────────────────────────────────────────
-const handleRemotePlayerLeft = async (leaverName = "A player") => {
-  try {
-    getGameUIElements();
-    if (leftModalMsg) leftModalMsg.textContent = `${leaverName} left the game.`;
-    leftModal?.classList.remove("hidden");
-    setTimeout(() => { leftModal?.classList.add("hidden"); goHome(); }, 3000);
-    await updateDoc(gameRef(), { playerLeft: null });
-  } catch (e) { console.warn(e); }
-};
-
 // ─── Navigation ────────────────────────────────────────────────────────────────
 const goHome = async () => {
   if (pendingStrokes.length) await flushStrokes();
+
+  // Bug C6 fix: goHome only removes *this* player from the room.
+  // It does not auto-redirect other players — that's handlePlayerLeft's job.
   try {
     if (gameId) {
       await runTransaction(db, async tx => {
@@ -847,19 +953,35 @@ const goHome = async () => {
         if (!snap.exists()) return;
         const d  = snap.data();
         const me = (d.players || []).find(p => p.id === user?.uid);
-        if (me) {
-          tx.update(gameRef(), {
-            players: (d.players || []).filter(p => p.id !== user?.uid),
-            playerLeft: me.name,
-            chat: arrayUnion({ id: "system", name: "", text: `${me.name} left the room.`, timestamp: Date.now() })
-          });
-        }
+        if (!me) return;
+
+        const remaining  = (d.players || []).filter(p => p.id !== user?.uid);
+        const newOrder   = (d.drawOrder || []).filter(id => id !== user?.uid);
+        const itWasMyTurn = d.currentPlayer === user?.uid;
+
+        tx.update(gameRef(), {
+          players: remaining,
+          drawOrder: newOrder,
+          playerLeft: me.name,
+          chat: arrayUnion({
+            id: "system", name: "",
+            text: `${me.name} left the game.`,
+            timestamp: Date.now()
+          }),
+          // If it was my turn, mark so remaining players know to advance
+          ...(itWasMyTurn && remaining.length >= MIN_PLAYERS ? { currentPlayer: '__gone__' } : {})
+        });
       });
     }
   } catch (e) { console.warn(e); }
 
+  cleanup();
+};
+
+const cleanup = () => {
   if (unsubscribeGame) { unsubscribeGame(); unsubscribeGame = null; }
   clearInterval(timerInterval);
+  currentDeadline = null;
   clearCanvas();
   pendingStrokes = [];
   addGameEventListeners._bound = false;
@@ -873,20 +995,27 @@ const goHome = async () => {
   if (roomIdSpanInline) roomIdSpanInline.textContent = '';
 };
 
+// Bug C7 fix: resetGame also resets teams membership to empty and drawOrder
 const resetGame = async () => {
   if (pendingStrokes.length) await flushStrokes();
   await runTransaction(db, async tx => {
     const snap = await tx.get(gameRef());
     if (!snap.exists()) return;
-    const players = snap.data().players.map(p => ({ ...p, score: 0 }));
+    const d       = snap.data();
+    const players = d.players.map(p => ({ ...p, score: 0 }));
+    // Reset team members but keep team definitions so owner can re-assign
+    const teams   = (d.teams || []).map(t => ({ ...t, members: [] }));
     tx.update(gameRef(), {
-      players, state: "waiting",
-      currentPlayer: null, word: null, wordChoices: [], usedWords: [],
-      round: 0, strokes: [], chat: [], drawOrder: [], drawOrderIndex: 0,
-      playerLeft: null, wordPickEndsAt: null, turnEndsAt: null,
+      players, teams,
+      state: "waiting",
+      currentPlayer: null, word: null, wordChoices: [],
+      usedWords: [], round: 0, strokes: [], chat: [],
+      drawOrder: [], drawOrderIndex: 0, playerLeft: null,
+      wordPickEndsAt: null, turnEndsAt: null,
       lastGuesser: null, guessedBy: {}, firstGuesser: null,
     });
   });
+  lastChatLen = 0;
 };
 
 // ─── Event Listeners ───────────────────────────────────────────────────────────
@@ -894,29 +1023,39 @@ const addGameEventListeners = () => {
   if (addGameEventListeners._bound) return;
   addGameEventListeners._bound = true;
 
-  brushSizeInput?.addEventListener("input",  e => { brushSize = +e.target.value || 5; });
-  brushColorInput?.addEventListener("click", () => { isErasing = false; eraserBtn?.classList.remove('active'); brushBtn?.classList.add('active'); });
+  brushSizeInput?.addEventListener("input", e => { brushSize = +e.target.value || 5; });
+  brushColorInput?.addEventListener("click", () => {
+    isErasing = false; eraserBtn?.classList.remove('active'); brushBtn?.classList.add('active');
+  });
   brushColorInput?.addEventListener("input", e => { isErasing = false; brushColor = e.target.value || "#000000"; });
-  clearCanvasBtn?.addEventListener("click",  async () => {
+
+  clearCanvasBtn?.addEventListener("click", async () => {
     if (!canDrawNow()) return;
     pendingStrokes = [];
     await updateDoc(gameRef(), { strokes: [] });
     clearCanvas();
   });
-  undoBtn?.addEventListener("click",    undoLastStroke);
-  eraserBtn?.addEventListener("click",  () => { isErasing = true;  eraserBtn.classList.add('active');    brushBtn?.classList.remove('active'); });
-  brushBtn?.addEventListener("click",   () => { isErasing = false; brushBtn.classList.add('active');     eraserBtn?.classList.remove('active'); });
-  submitGuessBtn?.addEventListener("click",  submitGuess);
+
+  undoBtn?.addEventListener("click", undoLastStroke);
+  eraserBtn?.addEventListener("click", () => { isErasing = true; eraserBtn.classList.add('active'); brushBtn?.classList.remove('active'); });
+  brushBtn?.addEventListener("click",  () => { isErasing = false; brushBtn.classList.add('active'); eraserBtn?.classList.remove('active'); });
+
+  submitGuessBtn?.addEventListener("click", submitGuess);
   guessInput?.addEventListener("keydown", e => { if (e.key === 'Enter') submitGuess(); });
-  sendChatBtn?.addEventListener("click",  () => sendChatMessage(chatInput?.value));
-  chatInput?.addEventListener("keydown",  e => { if (e.key === 'Enter') sendChatMessage(chatInput.value); });
+
+  sendChatBtn?.addEventListener("click", () => sendChatMessage(chatInput?.value));
+  chatInput?.addEventListener("keydown", e => { if (e.key === 'Enter') sendChatMessage(chatInput.value); });
+
   playAgainBtn?.addEventListener("click", async () => {
     endGameModal?.classList.add("hidden");
-    clearCanvas(); lastChatLen = 0;
+    clearCanvas();
     if (chatMessagesContainer) chatMessagesContainer.innerHTML = '';
     await resetGame();
   });
-  leftOkBtn?.addEventListener("click",    () => leftModal?.classList.add("hidden"));
+
+  leftOkBtn?.addEventListener("click", () => leftModal?.classList.add("hidden"));
+  // Bug C6 fix: "Home" in the left-modal just calls goHome for the person clicking it
+  document.getElementById("home-btn")?.addEventListener("click", goHome);
   homeBtnModal?.addEventListener("click", goHome);
 
   window.addEventListener("beforeunload", () => {
@@ -929,18 +1068,19 @@ const addGameEventListeners = () => {
     const h = e => {
       if (canDrawNow()) e.preventDefault();
       const t = e.type;
-      if (t === "mousedown" || t === "touchstart") startDrawing(e);
-      else if (t === "mousemove" || t === "touchmove") draw(e);
-      else if (t === "mouseup" || t === "mouseout" || t === "touchend") stopDrawing();
+      if      (t === "mousedown" || t === "touchstart") startDrawing(e);
+      else if (t === "mousemove" || t === "touchmove")  draw(e);
+      else if (t === "mouseup"   || t === "mouseout" || t === "touchend") stopDrawing();
     };
     ["mousedown","mousemove","mouseup","mouseout"].forEach(ev => canvas.addEventListener(ev, h));
     ["touchstart","touchmove","touchend"].forEach(ev => canvas.addEventListener(ev, h, { passive: false }));
+
     const dot = document.getElementById("cursor-dot");
     if (dot) {
-      canvas.addEventListener("pointerenter",  () => { dot.style.display = "block"; });
-      canvas.addEventListener("pointerleave",  () => { dot.style.display = "none"; });
-      canvas.addEventListener("pointermove",   e  => { dot.style.left = `${e.clientX}px`; dot.style.top = `${e.clientY}px`; });
-      canvas.addEventListener("touchstart",    () => { dot.style.display = "none"; }, { passive: true });
+      canvas.addEventListener("pointerenter", () => { dot.style.display = "block"; });
+      canvas.addEventListener("pointerleave", () => { dot.style.display = "none"; });
+      canvas.addEventListener("pointermove",  e  => { dot.style.left = `${e.clientX}px`; dot.style.top = `${e.clientY}px`; });
+      canvas.addEventListener("touchstart",   () => { dot.style.display = "none"; }, { passive: true });
     }
   }
 
@@ -966,7 +1106,9 @@ const undoLastStroke = async () => {
 };
 
 const wireCopy = (btnId, srcId, tipId) => {
-  const btn = document.getElementById(btnId), src = document.getElementById(srcId), tip = tipId ? document.getElementById(tipId) : null;
+  const btn = document.getElementById(btnId);
+  const src = document.getElementById(srcId);
+  const tip = tipId ? document.getElementById(tipId) : null;
   if (!btn || !src) return;
   btn.addEventListener("click", () => {
     const text = (src.textContent || '').trim();
@@ -988,16 +1130,10 @@ const addInitialEventListeners = () => {
     try {
       await setDoc(gameRef(), {
         players: [{ id: user.uid, name: username, score: 0 }],
-        state: "waiting",
-        createdAt: Date.now(),
-        owner: user.uid,
-        mode: MODE_FFA,
-        teams: defaultTeams,
-        drawOrder: [],
-        drawOrderIndex: 0,
-        guessedBy: {},
-        firstGuesser: null,
-        version: 2
+        state: "waiting", createdAt: Date.now(), owner: user.uid,
+        mode: MODE_FFA, teams: defaultTeams,
+        drawOrder: [], drawOrderIndex: 0,
+        guessedBy: {}, firstGuesser: null, version: 2
       });
       waitingInline?.classList.remove('hidden');
       if (roomIdSpanInline) roomIdSpanInline.textContent = gameId;
@@ -1017,7 +1153,7 @@ const addInitialEventListeners = () => {
         if (!snap.exists()) throw new Error("Room not found!");
         const d = snap.data();
         if ((d.players || []).length >= MAX_PLAYERS) throw new Error(`Room is full (max ${MAX_PLAYERS})!`);
-        if (d.state !== "waiting") throw new Error("Game already in progress!");
+        if (d.state !== "waiting") throw new Error("Game already started!");
         tx.update(gameRef(), { players: arrayUnion({ id: user.uid, name: username, score: 0 }) });
       });
       waitingInline?.classList.remove('hidden');
@@ -1026,13 +1162,11 @@ const addInitialEventListeners = () => {
     } catch (e) { statusMessage.textContent = e.message || "Failed to join."; console.error(e); }
   });
 
-  // Mode selector
   lobbyModeSelect?.addEventListener("change", async () => {
     if (gameData?.owner !== user.uid) return;
     await updateDoc(gameRef(), { mode: lobbyModeSelect.value });
   });
 
-  // Start button (owner only)
   lobbyStartBtn?.addEventListener("click", async () => {
     if (gameData?.owner !== user.uid) return;
     await startGame();
