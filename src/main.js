@@ -351,7 +351,6 @@ const nextTurn = async (overrideOrder = null) => {
       lastGuesser: null,
       guessedBy: {},
       firstGuesser: null,
-      advanceTurn: false, // clear the flag
     });
   });
 };
@@ -413,20 +412,25 @@ const submitGuess = async () => {
     const guesserPts = Math.round(basePoints * (isFirst ? 1 : LATE_GUESSER_MULT));
     const drawerPts  = isFirst ? Math.round(basePoints * DRAWER_POINTS_MULT) : 0;
 
+    // Use a plain object as a ref so the transaction callback can write out
+    // whether to advance — survives retries (last retry wins, which is correct)
+    const txResult = { shouldAdvance: false };
+
     await runTransaction(db, async tx => {
       const snap = await tx.get(gameRef());
       if (!snap.exists()) return;
       const d = snap.data();
-      if ((d.guessedBy || {})[guesserId]) return; // already counted, bail
+      if ((d.guessedBy || {})[guesserId]) {
+        txResult.shouldAdvance = false; // already counted on a previous attempt
+        return;
+      }
 
       const newGuessedBy  = { ...(d.guessedBy || {}), [guesserId]: true };
       const activePlayers = d.players || [];
       const nonDrawers    = activePlayers.filter(p => p.id !== drawerId);
 
-      const allGuessed   = nonDrawers.every(p => newGuessedBy[p.id]);
-      // Fix Bug 1: store shouldAdvance inside Firestore so all clients can check it
-      // after the transaction — not in a JS closure variable
-      const shouldAdv    = allGuessed || d.mode === MODE_TEAMS;
+      const allGuessed = nonDrawers.every(p => newGuessedBy[p.id]);
+      txResult.shouldAdvance = allGuessed || d.mode === MODE_TEAMS;
 
       const updatedPlayers = activePlayers.map(p => {
         if (p.id === guesserId) return { ...p, score: p.score + guesserPts };
@@ -438,9 +442,6 @@ const submitGuess = async () => {
         players: updatedPlayers,
         guessedBy: newGuessedBy,
         firstGuesser: d.firstGuesser || guesserId,
-        // Write shouldAdvance flag into Firestore so the snapshot handler
-        // on every client can decide to call nextTurn without a closure race
-        ...(shouldAdv ? { advanceTurn: true } : {}),
         chat: arrayUnion({
           id: "system", name: "",
           text: `✅ <strong>${guesser.name}</strong> guessed it! (+${guesserPts} pts)`,
@@ -449,9 +450,9 @@ const submitGuess = async () => {
       });
     });
 
-    // Fix Bug 1: read the flag from Firestore state (already updated in snapshot handler)
-    // The snapshot will have fired by now updating local gameData
-    if (gameData?.advanceTurn) await nextTurn();
+    // txResult is set synchronously inside the callback on the final retry,
+    // so it is always correct by the time runTransaction resolves
+    if (txResult.shouldAdvance) await nextTurn();
 
   } else {
     // Wrong guess
