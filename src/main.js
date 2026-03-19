@@ -161,6 +161,11 @@ const showScreen = id => {
   screens.forEach(s => s.classList.add("hidden"));
   document.getElementById(id)?.classList.remove("hidden");
   document.getElementById("topbar")?.classList.toggle("hidden", id !== GAME_SCREEN_ID);
+  // Fix 1: hide mobile chat FAB and backdrop when not in-game
+  const inGame = id === GAME_SCREEN_ID;
+  document.getElementById("chat-toggle")?.classList.toggle("hidden", !inGame);
+  document.getElementById("chat-backdrop")?.classList.toggle("hidden", !inGame);
+  if (!inGame) closeChat();
 };
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -691,9 +696,15 @@ const updateUIForTurn = () => {
 
   // Spectate message for teams (opposing team) or already-guessed players
   const spectateMsgEl = document.getElementById("spectate-msg");
+  const isSpectating = !myTurn && hasWord && !iCanGuess && !alreadyGuessed();
+  const justGuessed  = !myTurn && alreadyGuessed();
   if (spectateMsgEl) {
-    const showSpectate = !myTurn && hasWord && !iCanGuess && !alreadyGuessed();
-    spectateMsgEl.classList.toggle("hidden", !showSpectate);
+    spectateMsgEl.classList.toggle("hidden", !isSpectating);
+  }
+  // Fix 2: on mobile, auto-open chat for spectators and players who already guessed
+  // so they have something useful on screen instead of a blank canvas
+  if (isMobile() && (isSpectating || justGuessed)) {
+    if (!document.body.classList.contains('chat-open')) openChat();
   }
 
   if (wordToDrawEl) wordToDrawEl.textContent = myTurn && hasWord ? gameData.word : '';
