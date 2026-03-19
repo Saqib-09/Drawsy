@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Guess the Drawing</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -10,188 +10,224 @@
 
 <body class="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 relative">
 
-  <!-- Topbar (only visible during gameplay) -->
-  <div id="topbar" class="hidden w-full fixed top-0 left-0 bg-white/90 backdrop-blur border-b border-gray-200 z-50">
-    <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-      <div id="game-info" class="flex items-center gap-3">
-        <span class="turn-pill">✏️ <span id="turn-indicator" class="ml-1 font-bold">—</span></span>
-        <span class="round-pill">Round <span id="round-number" class="ml-1 font-bold">_ /3</span></span>
-        <span id="timer-pill-wrap" class="timer-pill">⏱ <span id="turn-timer" class="ml-1 font-bold tabular-nums">--</span>s</span>
+  <!-- ── Topbar (gameplay only) ─────────────────────────────────────────────── -->
+  <div id="topbar" class="hidden w-full fixed top-0 left-0 z-50">
+    <div class="topbar-inner max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+      <div id="game-info" class="flex items-center gap-2 flex-wrap">
+        <span class="pill">✏️ <span id="turn-indicator" class="font-bold ml-1">—</span></span>
+        <span class="pill">Round <span id="round-number" class="font-bold ml-1">–/–</span></span>
+        <span class="pill">⏱ <span id="turn-timer" class="font-bold tabular-nums ml-1">--</span>s</span>
       </div>
-      <button id="home-btn-modal" class="btn-ghost px-3 py-1 rounded-md text-sm">⬅ Home</button>
+      <button id="home-btn-modal" class="btn-ghost text-sm px-3 py-1 rounded-lg">⬅ Home</button>
     </div>
     <div class="w-full h-1 bg-white/20">
-      <div id="turn-progress" class="h-1 bg-white/80 transition-all" style="width:0%"></div>
+      <div id="turn-progress" class="h-1 bg-white/80" style="width:0%"></div>
     </div>
   </div>
 
-  <!-- Screens wrapper -->
-  <div id="screens" class="pt-28 w-full max-w-5xl mx-auto px-4 sm:px-6">
+  <!-- ── Screens wrapper ────────────────────────────────────────────────────── -->
+  <div id="screens" class="pt-24 w-full max-w-6xl mx-auto px-4 sm:px-6 pb-8">
 
-    <!-- Welcome Screen -->
-    <section id="welcome-screen" class="w-full text-center space-y-6 bg-white/80 backdrop-blur-md rounded-2xl shadow-2xl p-10 border border-white/40">
-      <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight">🎨 Guess the Drawing</h1>
-      <p class="text-gray-600 text-lg">A fun two-player doodle &amp; guess game. Invite a friend and let's play!</p>
+    <!-- ════════════════════════════════════════════════════════════════════════
+         WELCOME SCREEN
+         ════════════════════════════════════════════════════════════════════════ -->
+    <section id="welcome-screen" class="w-full">
+      <div class="bg-white/85 backdrop-blur-md rounded-2xl shadow-2xl p-8 border border-white/40 text-center max-w-xl mx-auto">
+        <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">🎨 Guess the Drawing</h1>
+        <p class="text-gray-500 text-base mb-6">2–8 players · Free-for-all or Teams</p>
 
-      <div class="max-w-xl mx-auto space-y-4">
-        <input id="username-input" type="text" placeholder="Enter your name"
-               class="w-full p-3 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200"/>
+        <div class="space-y-3">
+          <input id="username-input" type="text" placeholder="Your name"
+                 class="w-full p-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition"/>
 
-        <div class="flex flex-col md:flex-row gap-4">
-          <button id="create-room-btn"
-                  class="w-full md:w-1/2 bg-indigo-600 text-white p-3 rounded-md hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-            Create New Room
+          <button id="create-room-btn" disabled
+                  class="w-full bg-indigo-600 text-white p-3 rounded-xl font-semibold hover:bg-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            Create Room
           </button>
 
-          <div class="w-full md:w-1/2 flex flex-col gap-2">
-            <input id="join-room-input" type="text" placeholder="Enter Room ID"
-                   class="p-3 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200"/>
-            <button id="join-room-btn"
-                    class="bg-gray-300 text-gray-800 p-3 rounded-md hover:bg-gray-400 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-              Join Room
+          <div class="flex gap-2">
+            <input id="join-room-input" type="text" placeholder="Room ID"
+                   class="flex-1 p-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition"/>
+            <button id="join-room-btn" disabled
+                    class="bg-gray-200 text-gray-800 px-5 rounded-xl font-semibold hover:bg-gray-300 transition disabled:opacity-40 disabled:cursor-not-allowed">
+              Join
             </button>
           </div>
+
+          <p id="status-message" class="text-sm text-gray-500 min-h-[1.25rem]"></p>
         </div>
+      </div>
 
-        <p id="status-message" class="text-sm text-gray-600 font-medium"></p>
-
-        <!-- Inline waiting block -->
-        <div id="waiting-inline" class="hidden mt-6 text-left bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-          <h2 class="text-xl font-bold text-gray-800">Waiting for a friend…</h2>
-          <p class="text-gray-600 mt-1">Share this Room ID with your friend:</p>
-
-          <div class="flex items-center gap-2 mt-3">
-            <span id="room-id-inline" class="text-lg font-mono px-3 py-2 bg-gray-50 rounded-md border"></span>
-            <button id="copy-btn-inline" class="relative px-3 py-2 rounded-md bg-gray-200 hover:bg-gray-300 transition">
+      <!-- ── Lobby (shown after create/join) ──────────────────────────────── -->
+      <div id="waiting-inline" class="hidden mt-5 bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-white/40 p-6 max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold text-gray-800">Lobby</h2>
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-gray-500">Room ID:</span>
+            <span id="room-id-inline" class="font-mono font-bold text-gray-900 bg-gray-100 px-3 py-1 rounded-lg border text-sm"></span>
+            <button id="copy-btn-inline" class="relative text-sm px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition">
               Copy
-              <span id="copy-tip"
-                    class="absolute -top-7 left-1/2 -translate-x-1/2 text-xs bg-black text-white rounded px-2 py-1 opacity-0 pointer-events-none transition-opacity">
-                Copied!
-              </span>
+              <span id="copy-tip" class="absolute -top-8 left-1/2 -translate-x-1/2 text-xs bg-black text-white rounded px-2 py-1 opacity-0 pointer-events-none transition-opacity whitespace-nowrap">Copied!</span>
             </button>
           </div>
-          <p id="player-status-inline" class="text-indigo-600 font-medium mt-3">
-            Waiting for a second player to join…
-          </p>
         </div>
+
+        <!-- Mode selector -->
+        <div class="mb-4 flex items-center gap-3">
+          <label class="text-sm font-semibold text-gray-600 shrink-0">Game mode:</label>
+          <select id="lobby-mode-select" class="flex-1 p-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+            <option value="ffa">🆚 Free-for-All — everyone guesses each turn</option>
+            <option value="teams">🤝 Teams (2v2) — only teammates guess for each other</option>
+          </select>
+        </div>
+
+        <!-- Team setup (Teams mode only) -->
+        <div id="lobby-team-setup" class="hidden mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+          <p class="font-semibold mb-1">👉 Assign players to teams below (owner only)</p>
+          <p class="text-xs text-amber-600">Each team needs at least 1 player. You can do 1v1, 2v2, or uneven.</p>
+        </div>
+
+        <!-- Player list -->
+        <div id="lobby-player-list" class="space-y-2 mb-4"></div>
+
+        <p id="player-status-inline" class="text-sm text-indigo-600 font-medium mb-4"></p>
+
+        <!-- Start button (owner only) -->
+        <button id="lobby-start-btn" class="hidden w-full bg-green-600 text-white py-3 rounded-xl font-bold text-base hover:bg-green-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          🚀 Start Game
+        </button>
       </div>
     </section>
 
-    <!-- Gameplay Screen -->
-    <section id="game-play-area" class="hidden pt-2 w-full grid md:grid-cols-4 gap-6 min-h-[calc(100vh-7rem)]">
+    <!-- ════════════════════════════════════════════════════════════════════════
+         GAMEPLAY SCREEN
+         ════════════════════════════════════════════════════════════════════════ -->
+    <section id="game-play-area" class="hidden pt-1 w-full">
 
-      <!-- Left: Board -->
-      <div class="md:col-span-3 flex flex-col items-center bg-white rounded-xl shadow-xl p-4 min-h-0 overflow-y-auto">
+      <!-- Team banner (Teams mode) -->
+      <div id="team-banner" class="hidden mb-3 px-4 py-2 rounded-xl text-center font-semibold text-sm border transition-all"></div>
 
-        <!-- Canvas -->
-        <div class="canvas-wrap w-full aspect-[4/3] max-h-[60vh] flex-shrink-0 rounded-xl border-2 border-gray-200 overflow-hidden shadow-sm bg-white">
-          <canvas id="drawing-canvas" class="w-full h-full"></canvas>
-        </div>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
 
-        <!-- Word hint (fix #11: rendered as blanks) -->
-        <div id="word-hint" class="w-full text-center mt-4 min-h-[3rem]"></div>
+        <!-- ── Centre: Canvas + controls ──────────────────────────────────── -->
+        <div class="md:col-span-3 flex flex-col bg-white rounded-2xl shadow-xl p-4 gap-3">
 
-        <!-- Score display -->
-        <div id="score-display" class="w-full flex justify-center items-center gap-4 mt-2 text-center text-lg font-semibold text-gray-700"></div>
-
-        <!-- Drawing Controls -->
-        <div id="drawing-controls" class="hidden w-full flex-col items-center mt-4 space-y-4">
-          <div class="flex items-center gap-3 flex-wrap justify-center">
-            <span class="text-sm font-semibold text-gray-700">Size:</span>
-            <input type="range" id="brush-size" min="1" max="50" value="5" class="w-24"/>
+          <!-- Canvas -->
+          <div class="canvas-wrap w-full aspect-[4/3] max-h-[58vh] rounded-xl border-2 border-gray-100 overflow-hidden bg-white">
+            <canvas id="drawing-canvas" class="w-full h-full"></canvas>
           </div>
 
-          <div class="flex items-center justify-center gap-2 flex-wrap">
-            <button id="brush-btn" class="tool-btn active" title="Brush">🖌️</button>
-            <input type="color" id="brush-color" value="#000000" class="color-picker" title="Color"/>
-            <button id="eraser-btn" class="tool-btn" title="Eraser">🧽</button>
-            <button id="undo-btn"   class="tool-btn" title="Undo">↩️</button>
-            <button id="clear-canvas-btn" class="tool-btn" title="Clear canvas">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-9H9m7-2H8l-1 2h10l-1-2z"/>
-              </svg>
-            </button>
+          <!-- Word hint -->
+          <div id="word-hint" class="min-h-[2.5rem] text-center"></div>
+
+          <!-- Drawing Controls (drawer only) -->
+          <div id="drawing-controls" class="hidden flex-col items-center gap-3">
+            <!-- Tools row -->
+            <div class="flex items-center gap-2 flex-wrap justify-center">
+              <button id="brush-btn"  class="tool-btn active" title="Brush">🖌️</button>
+              <input  type="color" id="brush-color" value="#000000" class="color-picker" title="Color"/>
+              <button id="eraser-btn" class="tool-btn" title="Eraser">🧽</button>
+              <button id="undo-btn"   class="tool-btn" title="Undo">↩️</button>
+              <button id="clear-canvas-btn" class="tool-btn" title="Clear">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-9H9m7-2H8l-1 2h10l-1-2z"/>
+                </svg>
+              </button>
+              <div class="flex items-center gap-1 ml-2">
+                <span class="text-xs text-gray-400">Size</span>
+                <input type="range" id="brush-size" min="1" max="50" value="5" class="w-20"/>
+              </div>
+            </div>
+
+            <!-- Word choices -->
+            <div id="word-choices-wrap" class="hidden w-full text-center">
+              <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Choose a word to draw</p>
+              <div id="word-choices" class="flex flex-wrap gap-2 justify-center"></div>
+            </div>
+
+            <!-- Current word -->
+            <div class="text-center">
+              <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Your word</p>
+              <span id="word-to-draw" class="text-2xl font-extrabold tracking-wider text-indigo-700 bg-indigo-50 border border-indigo-200 px-5 py-2 rounded-xl inline-block"></span>
+            </div>
           </div>
 
-          <!-- Word choices (Fix #5: labelled with difficulty) -->
-          <div id="word-choices-wrap" class="w-full text-center mb-2 hidden">
-            <p class="text-sm font-semibold text-gray-500 mb-2">Choose a word to draw:</p>
-            <div id="word-choices" class="flex flex-wrap items-center justify-center gap-3"></div>
-            <!-- Fix #9: Skip word button -->
-            <button id="skip-word-btn" class="hidden mt-3 text-xs text-gray-400 underline hover:text-gray-600 transition">
-              🔄 Skip these words (once per turn)
-            </button>
-          </div>
-
-          <div class="flex flex-col items-center gap-1">
-            <p class="text-sm font-semibold text-indigo-600">Your word to draw:</p>
-            <span id="word-to-draw" class="text-2xl font-extrabold tracking-wider bg-indigo-50 border border-indigo-200 px-4 py-2 rounded-xl"></span>
-            <p class="text-gray-400 text-xs mt-1">Draw it for your friend to guess!</p>
-          </div>
-        </div>
-
-        <!-- Guessing Controls -->
-        <div id="guessing-controls" class="hidden w-full flex-col items-center mt-4 space-y-2">
-          <div class="flex w-full gap-2">
-            <input id="guess-input" type="text" placeholder="Type your guess and press Enter…"
-                   class="flex-1 p-3 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200"/>
-            <button id="submit-guess-btn" class="bg-green-500 text-white px-4 py-3 rounded-md hover:bg-green-600 transition-colors font-semibold">
-              Guess
-            </button>
-          </div>
-          <p id="guess-status" class="text-sm mt-1 text-center text-gray-500"></p>
-        </div>
-
-        <!-- Game Over Modal -->
-        <div id="end-game-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
-          <div class="modal-card rounded-2xl p-8 w-full max-w-sm text-center">
-            <div class="text-5xl mb-3">🏆</div>
-            <h3 class="text-2xl font-bold mb-2">Game Over!</h3>
-            <p id="final-scores" class="text-base text-gray-700 mb-6"></p>
-            <div class="flex gap-3 justify-center">
-              <!-- Fix #14: play again goes to rematch, not welcome screen -->
-              <button id="play-again-btn" class="bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 font-semibold transition">
-                🔄 Rematch
+          <!-- Guessing Controls (guessers only) -->
+          <div id="guessing-controls" class="hidden flex-col items-center gap-2">
+            <div class="flex w-full gap-2">
+              <input id="guess-input" type="text" placeholder="Type your guess…"
+                     class="flex-1 p-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition text-base"/>
+              <button id="submit-guess-btn" class="bg-green-500 text-white px-5 rounded-xl font-bold hover:bg-green-600 transition">
+                Guess
               </button>
             </div>
+            <p id="guess-status" class="text-sm text-gray-400 text-center min-h-[1.25rem]"></p>
+          </div>
+
+          <!-- Spectating message (teams: opposing team watches) -->
+          <div id="spectate-msg" class="hidden text-center text-gray-400 text-sm py-2 italic">
+            👀 Watch along — it's the other team's turn to draw!
           </div>
         </div>
 
-        <!-- Friend Left Modal -->
-        <div id="left-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
-          <div class="modal-card rounded-2xl p-6 w-full max-w-sm text-center">
-            <h3 class="text-2xl font-bold mb-3">Your friend left 😢</h3>
-            <p id="left-modal-msg" class="text-gray-700 mb-5">The other player has disconnected.</p>
-            <div class="flex gap-2 justify-center">
-              <button id="left-ok-btn" class="px-4 py-2 rounded-md bg-gray-200 hover:bg-gray-300">OK</button>
-              <button id="home-btn"    class="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700">Home</button>
+        <!-- ── Right column: Roster + Chat ────────────────────────────────── -->
+        <div class="md:col-span-2 flex flex-col gap-3">
+
+          <!-- Player roster -->
+          <div class="bg-white rounded-2xl shadow-xl p-4">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Players</h3>
+            <div id="player-roster" class="space-y-1"></div>
+          </div>
+
+          <!-- Chat (static on md+, slide-up on mobile) -->
+          <div id="chat-panel"
+               class="md:relative md:translate-y-0 md:transform-none
+                      fixed bottom-0 left-0 right-0 z-40
+                      translate-y-full transition-transform duration-300 ease-out
+                      md:!translate-y-0 flex-1">
+            <div class="md:h-full flex flex-col bg-white rounded-t-2xl md:rounded-2xl shadow-xl p-4 border border-gray-100">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Chat &amp; Events</h3>
+                <button id="chat-close" class="md:hidden text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+              <div id="chat-messages" class="flex-1 overflow-y-auto space-y-1.5 chat-container" style="max-height:280px;min-height:120px"></div>
+              <div class="flex gap-2 mt-3">
+                <input id="chat-input" type="text" placeholder="Message…"
+                       class="flex-1 p-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition"/>
+                <button id="send-chat-btn" class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition">
+                  Send
+                </button>
+              </div>
             </div>
           </div>
+
         </div>
       </div>
 
-      <!-- Right: Chat -->
-      <div id="chat-panel"
-           class="md:col-span-1 md:relative md:translate-y-0 md:transform-none
-                  md:h-auto md:block
-                  fixed bottom-0 left-0 right-0 z-40
-                  translate-y-full transition-transform duration-300 ease-out
-                  md:!translate-y-0">
+      <!-- ── Modals ──────────────────────────────────────────────────────── -->
 
-        <div class="md:h-full flex flex-col bg-gray-50 rounded-t-2xl md:rounded-lg p-4 border border-gray-200 shadow-lg md:shadow-none">
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-bold text-gray-700 text-sm tracking-wide uppercase">Chat</h3>
-            <button id="chat-close" class="md:hidden p-1 rounded hover:bg-gray-200 text-gray-500" aria-label="Close chat">✕</button>
-          </div>
-          <div class="h-0.5 w-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full mb-2"></div>
-          <div id="chat-messages" class="flex-1 overflow-y-auto space-y-1.5 chat-container min-h-0"></div>
-          <div class="flex items-center mt-3 gap-2">
-            <input id="chat-input" type="text" placeholder="Message…"
-                   class="flex-1 p-2 text-sm rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all"/>
-            <button id="send-chat-btn" class="bg-indigo-600 text-white px-3 py-2 rounded-md hover:bg-indigo-700 transition text-sm font-medium">
-              Send
-            </button>
+      <!-- Game Over -->
+      <div id="end-game-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div class="modal-card rounded-2xl p-8 w-full max-w-md text-center">
+          <div class="text-5xl mb-3">🏆</div>
+          <h3 class="text-2xl font-bold mb-4">Game Over!</h3>
+          <div id="final-scores" class="space-y-2 mb-6 text-left"></div>
+          <button id="play-again-btn" class="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition text-base">
+            🔄 Play Again
+          </button>
+        </div>
+      </div>
+
+      <!-- Player left -->
+      <div id="left-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div class="modal-card rounded-2xl p-6 w-full max-w-sm text-center">
+          <div class="text-4xl mb-3">😢</div>
+          <h3 class="text-xl font-bold mb-2">Someone left</h3>
+          <p id="left-modal-msg" class="text-gray-600 mb-5">A player has disconnected.</p>
+          <div class="flex gap-3 justify-center">
+            <button id="left-ok-btn" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 transition">Continue</button>
+            <button id="home-btn"    class="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition">Home</button>
           </div>
         </div>
       </div>
@@ -203,16 +239,11 @@
 
   <!-- Mobile chat toggle -->
   <button id="chat-toggle"
-          class="md:hidden fixed bottom-4 right-4 z-30 rounded-full shadow-lg px-4 py-3 bg-white/90 backdrop-blur border
-                text-gray-800 hover:bg-white transition text-sm font-medium">
+          class="md:hidden fixed bottom-4 right-4 z-30 rounded-full shadow-xl px-4 py-3 bg-white/90 backdrop-blur border text-gray-800 hover:bg-white transition text-sm font-semibold">
     💬 Chat
-    <span id="chat-badge"
-          class="ml-1 hidden text-xs font-bold px-1.5 py-0.5 rounded bg-red-500 text-white align-middle"></span>
+    <span id="chat-badge" class="ml-1 hidden text-xs font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white align-middle"></span>
   </button>
-
-  <!-- Backdrop for mobile chat -->
-  <div id="chat-backdrop"
-       class="md:hidden fixed inset-0 bg-black/30 backdrop-blur-[1px] z-30 opacity-0 pointer-events-none transition-opacity"></div>
+  <div id="chat-backdrop" class="md:hidden fixed inset-0 bg-black/30 z-30 opacity-0 pointer-events-none transition-opacity"></div>
 
   <script type="module" src="src/main.js"></script>
 </body>
