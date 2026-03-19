@@ -675,6 +675,7 @@ const sendChatMessage = async text => {
     chat: arrayUnion({ id: user.uid, name: username, text, timestamp: Date.now() })
   });
   if (chatInput) chatInput.value = '';
+  if (chatInputMobile) chatInputMobile.value = '';
   if (isMobile() && !document.body.classList.contains('chat-open')) openChat();
 };
 
@@ -862,6 +863,11 @@ const renderPlayerRoster = () => {
 
 // ─── State Handlers ────────────────────────────────────────────────────────────
 const handleWaitingState = () => {
+  // Hide game-over modal on all clients when state resets to waiting
+  endGameModal?.classList.add('hidden');
+  // Clear stale guess input so it doesn't persist into the next game
+  if (guessInput) guessInput.value = '';
+  if (guessStatusEl) guessStatusEl.textContent = '';
   showScreen('welcome-screen');
   waitingInline?.classList.remove('hidden');
   clearInterval(timerInterval);
@@ -1158,6 +1164,10 @@ const addGameEventListeners = () => {
     endGameModal?.classList.add("hidden");
     clearCanvas();
     if (chatMessagesContainer) chatMessagesContainer.innerHTML = '';
+    if (chatMessagesMobile)   chatMessagesMobile.innerHTML   = '';
+    if (guessInput)     guessInput.value     = '';
+    if (chatInput)      chatInput.value      = '';
+    if (chatInputMobile) chatInputMobile.value = '';
     await resetGame();
   });
 
