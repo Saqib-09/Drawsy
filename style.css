@@ -1,28 +1,27 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-body { font-family: 'Inter', sans-serif; }
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
 
-canvas {
-  touch-action: none;
-  cursor: crosshair;
-  background-color: #ffffff;
-}
+canvas { touch-action: none; background-color: #ffffff; }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
-.chat-container::-webkit-scrollbar { width: 4px; }
+/* ── Scrollbar ─────────────────────────────────────────────────────── */
+.chat-container::-webkit-scrollbar { width: 3px; }
 .chat-container::-webkit-scrollbar-track { background: transparent; }
 .chat-container::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-/* ── Cursor dot ──────────────────────────────────────────────────────────── */
+/* ── Cursor dot (desktop only) ─────────────────────────────────────── */
 #cursor-dot {
   position: fixed; width: 8px; height: 8px; border: 2px solid #000;
   border-radius: 50%; pointer-events: none; z-index: 40; display: none;
   transform: translate(-50%,-50%);
 }
-canvas { cursor: none; }
+@media (pointer: fine) { canvas { cursor: none; } }
 
-/* ── Topbar ──────────────────────────────────────────────────────────────── */
-.topbar-inner { }
+/* ── Safe area bottom padding ──────────────────────────────────────── */
+.safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
+
+/* ── Topbar ────────────────────────────────────────────────────────── */
 #topbar {
   background-image: linear-gradient(90deg,#6366f1,#8b5cf6,#06b6d4);
   color: #fff;
@@ -30,31 +29,144 @@ canvas { cursor: none; }
 }
 .pill {
   display: inline-flex; align-items: center;
-  padding: 0.2rem 0.7rem; border-radius: 9999px; font-size: 0.78rem;
+  padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.75rem;
   background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25);
-  color: #fff;
+  color: #fff; white-space: nowrap;
 }
 .btn-ghost {
   background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.28);
-  color: #fff; cursor: pointer; transition: background 0.15s;
+  color: #fff; cursor: pointer; transition: background 0.15s; font-weight: 600;
 }
 .btn-ghost:hover { background: rgba(255,255,255,0.28); }
 
-/* ── Canvas dotted grid ──────────────────────────────────────────────────── */
+/* Timer urgency flash when ≤10s */
+.timer-urgent { animation: urgency 0.6s ease infinite alternate; }
+@keyframes urgency {
+  from { background: rgba(255,255,255,0.18); }
+  to   { background: rgba(239,68,68,0.45); border-color: rgba(239,68,68,0.6); }
+}
+
+/* ── Layout ────────────────────────────────────────────────────────── */
+#screens { padding-top: 5.5rem; }
+@media (max-width: 640px) { #screens { padding-top: 5rem; } }
+
+/* ── Canvas wrap ───────────────────────────────────────────────────── */
 .canvas-wrap {
   background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
   background-size: 16px 16px;
 }
+canvas { max-width: 100%; max-height: 100%; position: static !important; display: block; }
 
-/* ── Chat bubbles ────────────────────────────────────────────────────────── */
+/* ── Word strip (mobile top bar showing word/blanks) ───────────────── */
+#word-strip { min-height: 2.75rem; }
+.letter-blank {
+  display: inline-block; width: 1.4rem; text-align: center;
+  font-size: 1.25rem; font-weight: 700; color: #cbd5e1;
+  border-bottom: 3px solid #cbd5e1; margin: 0 1px; line-height: 1; padding-bottom: 2px;
+}
+.letter-revealed {
+  display: inline-block; width: 1.4rem; text-align: center;
+  font-size: 1.25rem; font-weight: 700; color: #4f46e5;
+  border-bottom: 3px solid #4f46e5; margin: 0 1px; line-height: 1; padding-bottom: 2px;
+  animation: pop-in 0.2s ease;
+}
+@keyframes pop-in {
+  0%   { transform: scale(0.5); opacity: 0; }
+  70%  { transform: scale(1.2); }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+/* ── Player strip (mobile horizontal scroll) ───────────────────────── */
+#player-strip { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+#player-strip::-webkit-scrollbar { display: none; }
+.strip-player {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 0.35rem 0.6rem; border-radius: 0.75rem; border: 1.5px solid #e2e8f0;
+  background: white; font-size: 0.7rem; white-space: nowrap; shrink: 0;
+  min-width: 3.5rem;
+}
+.strip-player.strip-drawing { border-color: #a5b4fc; background: #eef2ff; }
+.strip-player.strip-me      { font-weight: 700; }
+.strip-player .strip-icon   { font-size: 1rem; line-height: 1; }
+.strip-player .strip-score  { font-weight: 700; color: #6366f1; font-size: 0.7rem; }
+.strip-team-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+
+/* ── Drawing dock ──────────────────────────────────────────────────── */
+.draw-dock {
+  display: flex; align-items: center; gap: 0.375rem;
+  background: white; border-radius: 0.875rem; padding: 0.5rem 0.75rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08); flex-wrap: nowrap; overflow-x: auto;
+}
+.draw-dock::-webkit-scrollbar { display: none; }
+.tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0.4rem 0.5rem; border-radius: 0.5rem; font-size: 1.25rem;
+  border: 2px solid transparent; background: #f1f5f9; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s; line-height: 1;
+  flex-shrink: 0; min-width: 2.4rem;
+}
+.tool-btn:active  { transform: scale(0.9); }
+.tool-btn.active  { border-color: #6366f1; background: #eef2ff; }
+.color-picker {
+  width: 2.2rem; height: 2.2rem; padding: 0; border: 2px solid #e5e7eb;
+  border-radius: 0.5rem; cursor: pointer; background: none; flex-shrink: 0;
+}
+.size-slider {
+  width: 4rem; height: 4px; cursor: pointer; accent-color: #6366f1;
+  flex-shrink: 0;
+}
+@media (max-width: 380px) { .size-slider { width: 3rem; } }
+
+/* ── Word chip ─────────────────────────────────────────────────────── */
+.word-chip {
+  padding: 0.5rem 1.1rem; border-radius: 0.75rem; font-size: 0.9rem;
+  font-weight: 600; background: #fff; border: 2px solid #e5e7eb; cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s; active:scale-95;
+}
+.word-chip:active { transform: scale(0.95); border-color: #6366f1; }
+
+/* ── Mode toggle buttons ───────────────────────────────────────────── */
+.mode-btn { background: transparent; color: #6b7280; cursor: pointer; transition: all 0.15s; }
+.mode-btn.active { background: #6366f1; color: #fff; }
+
+/* ── Lobby player rows ─────────────────────────────────────────────── */
+.lobby-player {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-radius: 0.75rem;
+  background: #f8fafc; border: 1.5px solid #e2e8f0; font-size: 0.875rem;
+}
+.lobby-player-me { border-color: #a5b4fc; background: #eef2ff; }
+.team-badge {
+  font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.5rem;
+  border-radius: 9999px; white-space: nowrap;
+}
+.team-assign-btn {
+  font-size: 0.68rem; font-weight: 700; padding: 0.25rem 0.6rem;
+  border-radius: 0.375rem; border: 1.5px solid #e5e7eb;
+  background: #fff; cursor: pointer; transition: all 0.12s;
+}
+.team-assign-btn:active { transform: scale(0.92); }
+.team-assign-btn.active { font-weight: 800; }
+
+/* ── Desktop player roster ─────────────────────────────────────────── */
+.roster-player {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.5rem; border-radius: 0.625rem; font-size: 0.8rem;
+  border: 1.5px solid transparent;
+}
+.roster-drawing { background: #eef2ff; border-color: #a5b4fc; }
+.roster-me      { font-weight: 600; }
+.roster-player .name  { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Chat bubbles ──────────────────────────────────────────────────── */
 .chat-msg {
-  padding: 0.3rem 0.6rem; border-radius: 0.875rem;
-  max-width: 92%; word-break: break-word; font-size: 0.8125rem;
+  padding: 0.3rem 0.65rem; border-radius: 0.875rem;
+  max-width: 88%; word-break: break-word; font-size: 0.8125rem;
   display: flex; flex-direction: column;
 }
-.chat-me   { background: linear-gradient(135deg,#7ba89e,#41a08a); color:#fff; align-self:flex-end; }
-.chat-them { background: linear-gradient(135deg,#274d7a,#93c5fd); color:#fff; align-self:flex-start; }
-/* Bug C8 fix: wrong guesses are visually distinct — no bubble, subtle inline style */
+.chat-me   { background: linear-gradient(135deg,#7ba89e,#41a08a); color: #fff; align-self: flex-end; }
+.chat-them { background: linear-gradient(135deg,#274d7a,#93c5fd); color: #fff; align-self: flex-start; }
 .wrong-guess {
   background: transparent; color: #94a3b8;
   font-size: 0.75rem; padding: 0.1rem 0.4rem;
@@ -62,106 +174,26 @@ canvas { cursor: none; }
 }
 .system-msg {
   background: #f8fafc; color: #475569; border: 1px solid #e2e8f0;
-  border-radius: 0.5rem; text-align: center; font-size: 0.75rem;
-  padding: 0.25rem 0.75rem; align-self: center; max-width: 100%;
+  border-radius: 0.5rem; text-align: center; font-size: 0.73rem;
+  padding: 0.2rem 0.7rem; align-self: center; max-width: 100%;
 }
 
-/* ── Word hint blanks ────────────────────────────────────────────────────── */
-.letter-blank {
-  display:inline-block; width:1.6rem; text-align:center;
-  font-size:1.375rem; font-weight:700; color:#cbd5e1;
-  border-bottom:3px solid #cbd5e1; margin:0 1px; line-height:1; padding-bottom:2px;
-}
-.letter-revealed {
-  display:inline-block; width:1.6rem; text-align:center;
-  font-size:1.375rem; font-weight:700; color:#4f46e5;
-  border-bottom:3px solid #4f46e5; margin:0 1px; line-height:1; padding-bottom:2px;
-  animation: pop-in 0.2s ease;
-}
-@keyframes pop-in {
-  0%   { transform:scale(0.5); opacity:0; }
-  70%  { transform:scale(1.2); }
-  100% { transform:scale(1);   opacity:1; }
-}
-
-/* ── Word chip ───────────────────────────────────────────────────────────── */
-.word-chip {
-  padding: 0.45rem 1rem; border-radius: 0.625rem; font-size: 0.9rem;
-  font-weight: 600; background: #fff; border: 2px solid #e5e7eb;
-  cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
-}
-.word-chip:hover { border-color:#6366f1; box-shadow:0 3px 8px rgba(99,102,241,0.2); transform:translateY(-1px); }
-
-/* ── Tool buttons ────────────────────────────────────────────────────────── */
-.tool-btn {
-  display:flex; align-items:center; justify-content:center;
-  padding:0.35rem 0.5rem; border-radius:0.5rem; font-size:1.2rem;
-  border:2px solid transparent; background:#f1f5f9; cursor:pointer;
-  transition:background 0.12s, border-color 0.12s; line-height:1;
-}
-.tool-btn:hover  { background:#e2e8f0; }
-.tool-btn.active { border-color:#6366f1; background:#eef2ff; }
-.color-picker {
-  width:2.25rem; height:2.25rem; padding:0; border:2px solid #e5e7eb;
-  border-radius:0.5rem; cursor:pointer; background:none;
-}
-
-/* ── Modal ───────────────────────────────────────────────────────────────── */
+/* ── Modal ─────────────────────────────────────────────────────────── */
 .modal-card {
-  background:rgba(255,255,255,0.97);
-  box-shadow:0 20px 60px rgba(0,0,0,0.2);
-  backdrop-filter:blur(10px);
+  background: rgba(255,255,255,0.97);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  backdrop-filter: blur(12px);
 }
-.score-row { padding:0.4rem 0.5rem; border-radius:0.5rem; background:#f8fafc; }
+.score-row { padding: 0.4rem 0.5rem; border-radius: 0.5rem; background: #f8fafc; }
 .team-score-row {
-  display:flex; justify-content:space-between; align-items:center;
-  padding:0.5rem 0.75rem; border-radius:0.75rem; border:1.5px solid;
-  margin-bottom:0.5rem;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.5rem 0.75rem; border-radius: 0.75rem; border: 1.5px solid;
+  margin-bottom: 0.5rem;
 }
 
-/* ── Lobby ───────────────────────────────────────────────────────────────── */
-.lobby-player {
-  display:flex; align-items:center; gap:0.5rem;
-  padding:0.5rem 0.75rem; border-radius:0.75rem;
-  background:#f8fafc; border:1.5px solid #e2e8f0;
-  font-size:0.875rem;
-}
-.lobby-player-me { border-color:#a5b4fc; background:#eef2ff; }
+/* ── Mobile chat sheet ─────────────────────────────────────────────── */
+.chat-open #chat-panel    { transform: translateY(0) !important; }
+.chat-open #chat-backdrop { opacity: 1 !important; pointer-events: auto !important; }
 
-.team-badge {
-  font-size:0.7rem; font-weight:600; padding:0.1rem 0.5rem;
-  border-radius:9999px; white-space:nowrap;
-}
-.team-assign-btn {
-  font-size:0.7rem; font-weight:600; padding:0.2rem 0.5rem;
-  border-radius:0.375rem; border:1.5px solid #e5e7eb;
-  background:#fff; cursor:pointer; transition:all 0.12s; white-space:nowrap;
-}
-.team-assign-btn:hover { border-color:#6366f1; }
-.team-assign-btn.active { font-weight:700; }
-
-/* ── Player roster (in-game) ─────────────────────────────────────────────── */
-.roster-player {
-  display:flex; align-items:center; gap:0.5rem;
-  padding:0.35rem 0.5rem; border-radius:0.625rem; font-size:0.8rem;
-  border:1.5px solid transparent;
-}
-.roster-drawing { background:#eef2ff; border-color:#a5b4fc; }
-.roster-me      { font-weight:600; }
-.roster-player .icon  { font-size:0.9rem; flex-shrink:0; }
-.roster-player .name  { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.roster-player .score { font-size:0.8rem; flex-shrink:0; }
-.team-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-
-/* ── Layout guards ───────────────────────────────────────────────────────── */
-#screens { padding-top: 5.5rem; }
-#game-play-area > .grid { min-height: 0; }
-canvas { max-width:100%; max-height:100%; position:static !important; }
-.canvas-wrap { max-height:58vh; }
-
-/* ── Mobile chat ─────────────────────────────────────────────────────────── */
-.chat-open #chat-panel    { transform:translateY(0); }
-.chat-open #chat-backdrop { opacity:1; pointer-events:auto; }
-
-/* ── Progress bar transition ─────────────────────────────────────────────── */
+/* ── Progress bar ──────────────────────────────────────────────────── */
 #turn-progress { transition: width 0.2s linear; }
