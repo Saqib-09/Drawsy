@@ -563,7 +563,8 @@ const setupFirestoreListener = () => {
       const sortedIds  = [...activeIds].sort();
       if (sortedIds[0] === user.uid) {
         const newOrder = (gameData.drawOrder || []).filter(id => activeIds.includes(id));
-        await nextTurn(newOrder.length ? newOrder : null);
+        // Can't await inside onSnapshot callback — fire and forget
+        nextTurn(newOrder.length ? newOrder : null).catch(e => console.error("nextTurn after leave:", e));
       }
       return; // wait for the nextTurn snapshot to re-render
     }
