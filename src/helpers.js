@@ -7,8 +7,8 @@ export const formatMMSS = (ms) => {
 
 export const formatSeconds = (ms) => Math.max(0, Math.floor(ms / 1000));
 
-export const getCoordinates = (e, canvas) => {
-  const rect = canvas.getBoundingClientRect();
+export const getCoordinates = (e, canvas, cachedRect = null) => {
+  const rect = cachedRect || canvas.getBoundingClientRect();
   const pt   = e.touches ? e.touches[0] : e;
   return { x: pt.clientX - rect.left, y: pt.clientY - rect.top };
 };

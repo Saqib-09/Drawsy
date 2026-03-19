@@ -102,10 +102,12 @@ let lastPlayerLeftSeen = null;
 let lastChatLen        = 0;
 
 // Timer tracking — Bug C3: only restart timer when deadline actually changes
-let timerInterval     = null;
-let currentDeadline   = null;
-let lastTurnKey       = '';
-let lastTickSec       = -1;
+let timerInterval        = null;
+let currentDeadline      = null;
+let lastTurnKey          = '';
+let prevTurnKey          = '';   // Fix Bug 3: track previous turn for redraw decision
+let lastKnownStrokeCount = -1;   // Fix Bug 3: skip redundant redraws
+let lastTickSec          = -1;
 
 // Drawing state
 let isDrawing     = false;
@@ -116,6 +118,8 @@ let brushSize     = 5;
 const ERASER_SIZE = 20;
 let isErasing     = false;
 let isRevealing   = false;
+// Fix Bug 3: cache canvas bounding rect — getBoundingClientRect() forces a reflow each call
+let canvasRect    = null;
 
 // Batched stroke buffer
 let pendingStrokes  = [];
@@ -347,6 +351,7 @@ const nextTurn = async (overrideOrder = null) => {
       lastGuesser: null,
       guessedBy: {},
       firstGuesser: null,
+      advanceTurn: false, // clear the flag
     });
   });
 };
@@ -408,22 +413,20 @@ const submitGuess = async () => {
     const guesserPts = Math.round(basePoints * (isFirst ? 1 : LATE_GUESSER_MULT));
     const drawerPts  = isFirst ? Math.round(basePoints * DRAWER_POINTS_MULT) : 0;
 
-    let shouldAdvance = false;
-
     await runTransaction(db, async tx => {
       const snap = await tx.get(gameRef());
       if (!snap.exists()) return;
       const d = snap.data();
       if ((d.guessedBy || {})[guesserId]) return; // already counted, bail
 
-      const newGuessedBy   = { ...(d.guessedBy || {}), [guesserId]: true };
-      const activePlayers  = d.players || [];
-      const nonDrawers     = activePlayers.filter(p => p.id !== drawerId);
+      const newGuessedBy  = { ...(d.guessedBy || {}), [guesserId]: true };
+      const activePlayers = d.players || [];
+      const nonDrawers    = activePlayers.filter(p => p.id !== drawerId);
 
-      // FFA: advance when all non-drawers have guessed
-      // Teams: advance immediately after the one teammate guesses
-      const allGuessed = nonDrawers.every(p => newGuessedBy[p.id]);
-      shouldAdvance    = allGuessed || d.mode === MODE_TEAMS;
+      const allGuessed   = nonDrawers.every(p => newGuessedBy[p.id]);
+      // Fix Bug 1: store shouldAdvance inside Firestore so all clients can check it
+      // after the transaction — not in a JS closure variable
+      const shouldAdv    = allGuessed || d.mode === MODE_TEAMS;
 
       const updatedPlayers = activePlayers.map(p => {
         if (p.id === guesserId) return { ...p, score: p.score + guesserPts };
@@ -435,9 +438,9 @@ const submitGuess = async () => {
         players: updatedPlayers,
         guessedBy: newGuessedBy,
         firstGuesser: d.firstGuesser || guesserId,
-        // Bug A fix: never set word to a sentinel value
-        // The UI reflects alreadyGuessed() immediately via local gameData update;
-        // if shouldAdvance, we call nextTurn() below after the transaction commits.
+        // Write shouldAdvance flag into Firestore so the snapshot handler
+        // on every client can decide to call nextTurn without a closure race
+        ...(shouldAdv ? { advanceTurn: true } : {}),
         chat: arrayUnion({
           id: "system", name: "",
           text: `✅ <strong>${guesser.name}</strong> guessed it! (+${guesserPts} pts)`,
@@ -446,8 +449,9 @@ const submitGuess = async () => {
       });
     });
 
-    // Call nextTurn AFTER transaction commits, not inside it
-    if (shouldAdvance) await nextTurn();
+    // Fix Bug 1: read the flag from Firestore state (already updated in snapshot handler)
+    // The snapshot will have fired by now updating local gameData
+    if (gameData?.advanceTurn) await nextTurn();
 
   } else {
     // Wrong guess
@@ -492,13 +496,14 @@ const canDrawNow = () =>
 const startDrawing = e => {
   if (!canDrawNow()) return;
   isDrawing = true;
-  const { x, y } = getCoordinates(e, canvas);
+  if (!canvasRect) canvasRect = canvas.getBoundingClientRect(); // ensure cached
+  const { x, y } = getCoordinates(e, canvas, canvasRect);
   lastPosition = { x, y }; currentStroke = [{ x, y }]; e.preventDefault();
 };
 
 const draw = e => {
   if (!isDrawing || !canDrawNow()) return;
-  const { x, y } = getCoordinates(e, canvas);
+  const { x, y } = getCoordinates(e, canvas, canvasRect);
   const erase = isErasing;
   const col   = erase ? null : brushColor;
   const sz    = erase ? ERASER_SIZE : brushSize;
@@ -544,6 +549,7 @@ const setupCanvas = () => {
   const dpr = window.devicePixelRatio || 1;
   const r   = canvas.getBoundingClientRect();
   if (!r.width || !r.height) return;
+  canvasRect = r; // Fix Bug 3: cache rect, invalidated here on resize
   const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
   if (canvas.width === w && canvas.height === h) return;
   canvas.width = w; canvas.height = h;
@@ -555,11 +561,14 @@ async function flushStrokes() {
   if (!pendingStrokes.length || !gameId) return;
   const batch = [...pendingStrokes]; pendingStrokes = [];
   try {
-    await runTransaction(db, async tx => {
-      const snap = await tx.get(gameRef());
-      if (!snap.exists()) return;
-      tx.update(gameRef(), { strokes: [...(snap.data().strokes || []), ...batch] });
-    });
+    // Fix Bug 3: use arrayUnion instead of read-then-write transaction
+    // arrayUnion is a server-side merge — no Firestore read needed, much faster
+    // Note: arrayUnion deduplicates by value equality, but stroke objects are unique
+    // so we must pass each stroke individually
+    const updates = {};
+    // Firestore arrayUnion can take multiple values: arrayUnion(a, b, c)
+    // Spread the batch into arrayUnion call
+    await updateDoc(gameRef(), { strokes: arrayUnion(...batch) });
   } catch (e) { pendingStrokes = [...batch, ...pendingStrokes]; console.error("Flush:", e); }
 }
 
@@ -863,7 +872,6 @@ const handleWaitingState = () => {
 
 // Bug C3 fix: only restart timer when the deadline actually changes
 const handlePlayingState = () => {
-  if (isMobile()) closeChat();
   waitingInline?.classList.add('hidden');
   showScreen(GAME_SCREEN_ID);
   getGameUIElements();
@@ -875,13 +883,26 @@ const handlePlayingState = () => {
 
   const turnKey = `${gameData.round}:${gameData.currentPlayer}`;
   if (lastTurnKey !== turnKey) {
+    prevTurnKey = lastTurnKey;
     lastTurnKey = turnKey;
+    lastKnownStrokeCount = -1; // reset so we redraw on new turn
     clearCanvas();
     sfx.newTurn();
     pendingStrokes = [];
-    lastChatLen = Math.min(lastChatLen, (gameData.chat || []).length); // don't re-render old msgs
+    lastChatLen = Math.min(lastChatLen, (gameData.chat || []).length);
+    if (isMobile()) closeChat();
   }
-  redrawCanvas(gameData.strokes || []);
+  // Fix Bug 3: skip expensive full redraw while drawer is actively drawing locally.
+  // The drawer's canvas is already correct from local drawLine() calls.
+  // Only redraw for guessers, or when the stroke count actually changes.
+  const incomingCount = (gameData.strokes || []).length;
+  if (!isDrawing && incomingCount !== lastKnownStrokeCount) {
+    lastKnownStrokeCount = incomingCount;
+    redrawCanvas(gameData.strokes || []);
+  } else if (!isDrawing && lastTurnKey !== prevTurnKey) {
+    // New turn — always redraw (canvas was cleared above)
+    redrawCanvas(gameData.strokes || []);
+  }
 
   // Bug C3 fix: determine the right deadline and only start a new timer if it changed
   const newDeadline = gameData.word ? gameData.turnEndsAt : gameData.wordPickEndsAt;
@@ -976,9 +997,10 @@ const runTimer = (deadline, onExpire) => {
   timerInterval = setInterval(tick, 200);
 };
 
-// Bug C1 fix: only current drawer advances timeout; also handles case where drawer left
+// Fix Bug 1: ALL clients attempt timeout advance — transaction guard prevents double-writes
+// This ensures turn advances even if the drawer's device is offline/backgrounded
 const handleTurnTimeout = async () => {
-  if (!gameData || gameData.currentPlayer !== user.uid) return;
+  if (!gameData) return;
   try {
     await runTransaction(db, async tx => {
       const snap = await tx.get(gameRef());
@@ -1065,7 +1087,8 @@ const cleanup = () => {
   clearCanvas();
   pendingStrokes = [];
   addGameEventListeners._bound = false;
-  lastTurnKey = ''; lastChatLen = 0; lastTickSec = -1;
+  lastTurnKey = ''; prevTurnKey = ''; lastChatLen = 0; lastTickSec = -1;
+  lastKnownStrokeCount = -1; canvasRect = null;
   gameData = null; gameId = null;
   if (chatMessagesContainer) chatMessagesContainer.innerHTML = '';
   if (chatMessagesMobile)   chatMessagesMobile.innerHTML   = '';
