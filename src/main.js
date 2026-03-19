@@ -37,6 +37,8 @@ const chatBackdrop       = document.getElementById('chat-backdrop');
 const chatBadge          = document.getElementById('chat-badge');
 
 const GAME_SCREEN_ID = "game-play-area";
+const modeFfaBtn    = document.getElementById('mode-ffa-btn');
+const modeTeamsBtn  = document.getElementById('mode-teams-btn');
 
 // ─── Gameplay DOM (lazy) ───────────────────────────────────────────────────────
 let gameInfoEl, turnIndicatorTop, roundNumberTop, timerDisplayTop, progressEl;
@@ -45,6 +47,8 @@ let brushSizeInput, brushColorInput, clearCanvasBtn, undoBtn, eraserBtn, brushBt
 let guessInput, submitGuessBtn, guessStatusEl, chatInput, sendChatBtn, chatMessagesContainer;
 let endGameModal, finalScoresEl, playAgainBtn, leftModal, leftOkBtn, homeBtnModal, leftModalMsg;
 let teamBannerEl, playerRosterEl;
+let wordStripEl, wordHintStripEl, wordToDrawStripEl, playerStripEl;
+let chatMessagesMobile, chatInputMobile, sendChatMobile;
 
 const getGameUIElements = () => {
   gameInfoEl       = document.getElementById("game-info");
@@ -76,8 +80,16 @@ const getGameUIElements = () => {
   leftOkBtn        = document.getElementById("left-ok-btn");
   homeBtnModal     = document.getElementById("home-btn-modal");
   leftModalMsg     = document.getElementById("left-modal-msg");
-  teamBannerEl     = document.getElementById("team-banner");
-  playerRosterEl   = document.getElementById("player-roster");
+  teamBannerEl        = document.getElementById("team-banner");
+  playerRosterEl      = document.getElementById("player-roster");
+  // Mobile-specific elements
+  wordStripEl         = document.getElementById("word-strip");
+  wordHintStripEl     = document.getElementById("word-hint-strip");
+  wordToDrawStripEl   = document.getElementById("word-to-draw-strip");
+  playerStripEl       = document.getElementById("player-strip");
+  chatMessagesMobile  = document.getElementById("chat-messages-mobile");
+  chatInputMobile     = document.getElementById("chat-input-mobile");
+  sendChatMobile      = document.getElementById("send-chat-btn-mobile");
 };
 
 // ─── Game State ────────────────────────────────────────────────────────────────
@@ -219,6 +231,11 @@ const renderLobby = () => {
   }).join('');
 
   if (lobbyModeSelect) { lobbyModeSelect.value = mode; lobbyModeSelect.disabled = !isOwner; }
+  // Sync pill buttons
+  modeFfaBtn?.classList.toggle('active', mode === MODE_FFA);
+  modeTeamsBtn?.classList.toggle('active', mode === MODE_TEAMS);
+  if (modeFfaBtn)   modeFfaBtn.disabled   = !isOwner;
+  if (modeTeamsBtn) modeTeamsBtn.disabled = !isOwner;
   if (lobbyTeamSetup)  lobbyTeamSetup.classList.toggle('hidden', mode !== MODE_TEAMS);
 
   if (lobbyStartBtn) {
@@ -652,34 +669,42 @@ const sendChatMessage = async text => {
 };
 
 // Bug C8 fix: render correct/incorrect guesses with distinct styles
+const makeChatEl = (m, isMe) => {
+  const isSystem = !m.name || m.name === "" || m.id === "system";
+  const wrap = document.createElement("div");
+  if (isSystem) {
+    wrap.className = "chat-msg system-msg";
+    wrap.innerHTML = m.text;
+  } else if (m.isIncorrect) {
+    wrap.className = `chat-msg wrong-guess ${isMe ? 'self-end' : 'self-start'}`;
+    wrap.innerHTML = `<span class="opacity-60 text-xs">${m.name}:</span> ❌ ${m.text}`;
+  } else {
+    wrap.className = `chat-msg ${isMe ? 'chat-me self-end' : 'chat-them self-start'}`;
+    wrap.innerHTML = `<span class="font-semibold">${m.name}:</span> ${m.text}`;
+  }
+  return wrap;
+};
+
 const renderChatDelta = () => {
   const chat = gameData?.chat || [];
-  if (!chatMessagesContainer || chat.length <= lastChatLen) return;
+  if (chat.length <= lastChatLen) return;
 
   for (let i = lastChatLen; i < chat.length; i++) {
-    const m       = chat[i];
-    const isMe    = m.id === user.uid;
-    const isSystem = !m.name || m.name === "" || m.id === "system";
-    const wrap    = document.createElement("div");
-
-    if (isSystem) {
-      wrap.className = "chat-msg system-msg";
-      wrap.innerHTML = m.text;
-    } else if (m.isIncorrect) {
-      // Wrong guess — subtle styling, not a full bubble
-      wrap.className = `chat-msg wrong-guess ${isMe ? 'self-end' : 'self-start'}`;
-      wrap.innerHTML = `<span class="opacity-60 text-xs">${m.name}:</span> ❌ ${m.text}`;
-    } else {
-      wrap.className = `chat-msg ${isMe ? 'chat-me self-end' : 'chat-them self-start'}`;
-      wrap.innerHTML = `<span class="font-semibold">${m.name}:</span> ${m.text}`;
+    const m    = chat[i];
+    const isMe = m.id === user.uid;
+    // Append to desktop container if present
+    if (chatMessagesContainer) {
+      chatMessagesContainer.appendChild(makeChatEl(m, isMe));
+      chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     }
-
-    chatMessagesContainer.appendChild(wrap);
+    // Mirror to mobile bottom-sheet container
+    if (chatMessagesMobile) {
+      chatMessagesMobile.appendChild(makeChatEl(m, isMe));
+      chatMessagesMobile.scrollTop = chatMessagesMobile.scrollHeight;
+    }
     if (!isMe) bumpUnread();
   }
-
   lastChatLen = chat.length;
-  chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
 };
 
 // ─── UI Updates ────────────────────────────────────────────────────────────────
@@ -723,21 +748,33 @@ const updateUIForTurn = () => {
     });
   }
 
-  // Word hint (blanks) — only show if word exists and it's not the drawer
+  // Build hint HTML helper
+  const buildHintHtml = () => {
+    if (!hasWord || myTurn) return '';
+    const revealed = gameData.revealedLetters || [];
+    const letters  = gameData.word.split('').map((ch, i) =>
+      ch === ' '
+        ? `<span class="mx-1 text-gray-300">·</span>`
+        : revealed.includes(i)
+          ? `<span class="letter-revealed">${ch.toUpperCase()}</span>`
+          : `<span class="letter-blank">_</span>`
+    );
+    return `<div class="flex flex-wrap justify-center gap-0.5">${letters.join('')}</div>
+      <div class="text-xs text-gray-400 mt-1">${gameData.word.replace(/ /g,'').length}${gameData.word.includes(' ') ? ' (2 words)' : ' letters'}</div>`;
+  };
+  // Desktop word hint (below canvas)
   const hintEl = document.getElementById("word-hint");
-  if (hintEl) {
-    if (hasWord && !myTurn) {
-      const revealed = gameData.revealedLetters || [];
-      const letters  = gameData.word.split('').map((ch, i) =>
-        ch === ' '
-          ? `<span class="mx-1 text-gray-300">·</span>`
-          : revealed.includes(i)
-            ? `<span class="letter-revealed">${ch.toUpperCase()}</span>`
-            : `<span class="letter-blank">_</span>`
-      );
-      hintEl.innerHTML = `<div class="flex flex-wrap justify-center gap-0.5">${letters.join('')}</div>
-        <div class="text-xs text-gray-400 mt-1">${gameData.word.replace(/ /g,'').length + (gameData.word.includes(' ') ? ' (2 words)' : ' letters')}</div>`;
-    } else { hintEl.innerHTML = ''; }
+  if (hintEl) hintEl.innerHTML = buildHintHtml();
+
+  // Word strip (mobile — always visible above canvas)
+  if (wordStripEl) {
+    const showStrip = hasWord || myTurn;
+    wordStripEl.classList.toggle('hidden', !showStrip);
+    if (wordHintStripEl) wordHintStripEl.innerHTML = (!myTurn && hasWord) ? buildHintHtml() : '';
+    if (wordToDrawStripEl) {
+      wordToDrawStripEl.classList.toggle('hidden', !myTurn || !hasWord);
+      wordToDrawStripEl.textContent = myTurn && hasWord ? gameData.word : '';
+    }
   }
 
   // Already-guessed status
@@ -767,16 +804,19 @@ const updateUIForTurn = () => {
   const drawerName = (gameData.players || []).find(p => p.id === gameData.currentPlayer)?.name || '—';
   if (turnIndicatorTop) turnIndicatorTop.textContent = drawerName;
   if (roundNumberTop)   roundNumberTop.textContent   = `${gameData.round} / ${MAX_ROUNDS}`;
+  const rnMobile = document.getElementById('round-number-mobile');
+  if (rnMobile) rnMobile.textContent = gameData.round;
 
   renderPlayerRoster();
 };
 
 const renderPlayerRoster = () => {
-  if (!playerRosterEl || !gameData) return;
+  if (!gameData) return;
   const players   = gameData.players || [];
   const teams     = gameData.teams   || [];
   const guessedBy = gameData.guessedBy || {};
-  playerRosterEl.innerHTML = players.map(p => {
+
+  const makeRosterRow = p => {
     const isDrawer   = p.id === gameData.currentPlayer;
     const hasGuessed = guessedBy[p.id];
     const myTeam     = teams.find(t => (t.members || []).includes(p.id));
@@ -787,7 +827,27 @@ const renderPlayerRoster = () => {
       <span class="name truncate">${p.name}</span>
       <span class="score ml-auto font-bold text-indigo-600">${p.score}</span>
     </div>`;
-  }).join('');
+  };
+
+  // Desktop roster
+  if (playerRosterEl) playerRosterEl.innerHTML = players.map(makeRosterRow).join('');
+
+  // Mobile horizontal strip — compact cards below canvas
+  if (playerStripEl) {
+    playerStripEl.innerHTML = players.map(p => {
+      const isDrawer   = p.id === gameData.currentPlayer;
+      const hasGuessed = guessedBy[p.id];
+      const myTeam     = teams.find(t => (t.members || []).includes(p.id));
+      const teamDot    = myTeam ? `<span class="strip-team-dot" style="background:${myTeam.border}"></span>` : '';
+      const icon       = isDrawer ? '✏️' : hasGuessed ? '✅' : '👁️';
+      const isMe       = p.id === user.uid;
+      return `<div class="strip-player shrink-0 ${isDrawer ? 'strip-drawing' : ''} ${isMe ? 'strip-me' : ''}">
+        <span class="strip-icon">${icon}</span>
+        <span class="truncate max-w-[4rem] text-center">${teamDot}${p.name}${isMe ? ' ·' : ''}</span>
+        <span class="strip-score">${p.score}</span>
+      </div>`;
+    }).join('');
+  }
 };
 
 // ─── State Handlers ────────────────────────────────────────────────────────────
@@ -893,6 +953,9 @@ const runTimer = (deadline, onExpire) => {
     if (progressEl) progressEl.style.width = `${total ? 100 - Math.floor((remaining / total) * 100) : 0}%`;
 
     if (secs <= 10 && secs !== lastTickSec && remaining > 0) { lastTickSec = secs; sfx.tick(); }
+    // Flash timer pill red when ≤10s
+    const timerPill = document.getElementById('timer-pill');
+    if (timerPill) timerPill.classList.toggle('timer-urgent', secs <= 10 && remaining > 0);
 
     // Only drawer triggers reveals
     if (gameData?.word && gameData.currentPlayer === user.uid) {
@@ -1005,6 +1068,7 @@ const cleanup = () => {
   lastTurnKey = ''; lastChatLen = 0; lastTickSec = -1;
   gameData = null; gameId = null;
   if (chatMessagesContainer) chatMessagesContainer.innerHTML = '';
+  if (chatMessagesMobile)   chatMessagesMobile.innerHTML   = '';
   if (joinRoomInput) joinRoomInput.value = '';
   statusMessage.textContent = '';
   showScreen("welcome-screen");
@@ -1062,6 +1126,9 @@ const addGameEventListeners = () => {
 
   sendChatBtn?.addEventListener("click", () => sendChatMessage(chatInput?.value));
   chatInput?.addEventListener("keydown", e => { if (e.key === 'Enter') sendChatMessage(chatInput.value); });
+  // Mobile chat sheet
+  sendChatMobile?.addEventListener("click", () => sendChatMessage(chatInputMobile?.value));
+  chatInputMobile?.addEventListener("keydown", e => { if (e.key === 'Enter') sendChatMessage(chatInputMobile.value); });
 
   playAgainBtn?.addEventListener("click", async () => {
     endGameModal?.classList.add("hidden");
@@ -1179,6 +1246,16 @@ const addInitialEventListeners = () => {
     } catch (e) { statusMessage.textContent = e.message || "Failed to join."; console.error(e); }
   });
 
+  // Mode toggle pill buttons (friendlier than <select> on mobile)
+  const setMode = async (mode) => {
+    if (gameData?.owner !== user.uid) return;
+    modeFfaBtn?.classList.toggle('active', mode === 'ffa');
+    modeTeamsBtn?.classList.toggle('active', mode === 'teams');
+    if (lobbyModeSelect) lobbyModeSelect.value = mode;
+    await updateDoc(gameRef(), { mode });
+  };
+  modeFfaBtn?.addEventListener('click',   () => setMode('ffa'));
+  modeTeamsBtn?.addEventListener('click', () => setMode('teams'));
   lobbyModeSelect?.addEventListener("change", async () => {
     if (gameData?.owner !== user.uid) return;
     await updateDoc(gameRef(), { mode: lobbyModeSelect.value });
